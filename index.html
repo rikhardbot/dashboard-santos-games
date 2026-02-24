@@ -14,16 +14,13 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, getDocs, setDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, getDocs, query, orderBy  setDoc, } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -51,6 +48,103 @@ onAuthStateChanged(auth, (user) => {
 });
 
 
+
+function setupUI(){
+  // Tabs
+  document.getElementById("tabReserva")?.addEventListener("click", () => showTab("reserva"));
+  document.getElementById("tabFaturamento")?.addEventListener("click", () => showTab("faturamento"));
+  document.getElementById("tabCadastro")?.addEventListener("click", () => showTab("cadastro"));
+
+  // Login / Logout
+  document.getElementById("btnLogin")?.addEventListener("click", () => doLogin());
+  document.getElementById("btnLogout")?.addEventListener("click", () => logout());
+
+  // Notifs
+  document.getElementById("btnNotif")?.addEventListener("click", () => toggleNotifs());
+  document.getElementById("btnClearNotifs")?.addEventListener("click", () => clearNotifs());
+
+  // Month nav (Reserva + Faturamento)
+  document.getElementById("btnPrevMonth")?.addEventListener("click", () => prevMonth());
+  document.getElementById("btnNextMonth")?.addEventListener("click", () => nextMonth());
+  document.getElementById("btnPrevMonthFat")?.addEventListener("click", () => prevMonth());
+  document.getElementById("btnNextMonthFat")?.addEventListener("click", () => nextMonth());
+
+  // Day panel buttons
+  document.getElementById("btnCloseDay")?.addEventListener("click", () => closeDayPanel());
+  document.getElementById("btnAddParticipant")?.addEventListener("click", () => addParticipant());
+
+  // Calendar click delegation
+  document.getElementById("calendar")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button.day");
+    if(!btn) return;
+    const dateStr = btn.getAttribute("data-date");
+    if(dateStr) openDay(dateStr);
+  });
+
+  // Faturamento day lines delegation
+  document.getElementById("fatDays")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button.dayLine");
+    if(!btn) return;
+    const dateStr = btn.getAttribute("data-date");
+    if(dateStr) openDay(dateStr);
+  });
+
+  // Confirmados/Espera actions delegation
+  const actionsHandler = (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if(!btn) return;
+    const action = btn.getAttribute("data-action");
+    const row = btn.closest(".row");
+    const dateStr = btn.getAttribute("data-date") || selectedDateStr;
+    const id = btn.getAttribute("data-id");
+    if(action === "promote") return promoteToConfirmed(dateStr, id);
+    if(action === "status") return updateStatus(dateStr, id, btn.getAttribute("data-status"));
+    if(action === "remove") return removeParticipant(dateStr, id);
+    if(action === "copy"){
+      const nome = row?.dataset?.nome || "";
+      const telefone = row?.dataset?.telefone || "";
+      const instagram = row?.dataset?.instagram || "";
+      return copyText(buildContactText({ nome, telefone, instagram }));
+    }
+  };
+  document.getElementById("confList")?.addEventListener("click", actionsHandler);
+  document.getElementById("esperaList")?.addEventListener("click", actionsHandler);
+
+  // Cadastro list delegation
+  document.getElementById("cadList")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if(!btn) return;
+    const action = btn.getAttribute("data-action");
+    const id = btn.getAttribute("data-id");
+    if(action === "cad-copy"){
+      const obj = window.__cadMap?.get(id);
+      if(obj) copyText(buildContactText(obj));
+      return;
+    }
+    if(action === "cad-vip"){
+      const obj = window.__cadMap?.get(id);
+      return toggleVip(id, !(obj?.vip));
+    }
+    if(action === "cad-edit"){
+      const obj = window.__cadMap?.get(id);
+      return openCadModal(id, obj);
+    }
+  });
+
+  // Cadastro modal buttons
+  document.getElementById("btnCadModalClose")?.addEventListener("click", () => closeCadModal());
+  document.getElementById("btnCadCancel")?.addEventListener("click", () => closeCadModal());
+  document.getElementById("btnCadSave")?.addEventListener("click", () => saveCad());
+  document.getElementById("btnCadDelete")?.addEventListener("click", () => deleteCad());
+
+  // Close modal by clicking overlay
+  document.getElementById("cadModal")?.addEventListener("click", (e) => {
+    if(e.target?.id === "cadModal") closeCadModal();
+  });
+}
+
+// Run setup once DOM exists (module runs after parse, but safe)
+setupUI();
 window.doLogin = async function doLogin(){
   const emailEl = document.getElementById("email");
   const senhaEl = document.getElementById("senha");
@@ -80,6 +174,11 @@ window.doLogin = async function doLogin(){
     pushNotif("Falha no login", msg);
     console.error("Login error:", err);
   }
+};
+
+window.doLogin = () => {
+  signInWithEmailAndPassword(auth, email.value, senha.value)
+    .catch(() => toast("Usuário ou senha inválidos."));
 };
 
 window.logout = async () => {
@@ -202,7 +301,7 @@ function renderCalendar(){
   for (let d = 1; d <= totalDays; d++) {
     const dateStr = `${year}-${String(currentMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     calendar.innerHTML += `
-      <button class="day" type="button" onclick="openDay('${dateStr}')">
+      <button class="day" type="button" data-date="${dateStr}">
         <span class="dayNum">${d}</span>
         <span id="badge-${dateStr}" class="badge"></span>
       </button>`;
@@ -280,7 +379,7 @@ onSnapshot(query(collection(db, "corujoes", dateStr, "participantes"), orderBy("
 
 function rowHtml(dateStr, id, d, isConfirmado){
   return `
-    <div class="row ${isConfirmado ? "confirmado" : "espera"}">
+    <div class="row ${isConfirmado ? "confirmado" : "espera"}" data-nome="${escapeHtml(d.nome)}" data-telefone="${escapeHtml(d.telefone || "")}" data-instagram="${escapeHtml(d.instagram || "")}">
       <div class="rowLeft">
         <div class="name">${escapeHtml(d.nome)}</div>
         <div class="contact">
@@ -295,14 +394,14 @@ function rowHtml(dateStr, id, d, isConfirmado){
       </div>
       <div class="rowActions">
         ${!isConfirmado ? `
-          <button class="btn" onclick="promoteToConfirmed(\'${dateStr}\',\'${id}\')">Subir p/ confirmados</button>
-          <button class="btn ghost" onclick="copyText(buildContactText(d))">Copiar contato</button>
+          <button class="btn" type="button" data-action="promote" data-date="${dateStr}" data-id="${id}">Subir p/ confirmados</button>
+          <button class="btn ghost" type="button" data-action="copy">Copiar contato</button>
           ${buildWhatsAppLink(d) ? `<a class="btn ghost linkbtn" href="${buildWhatsAppLink(d)}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
           ${buildInstagramLink(d) ? `<a class="btn ghost linkbtn" href="${buildInstagramLink(d)}" target="_blank" rel="noopener">Instagram</a>` : ``}
         ` : ``}
-        <button class="btn ghost" onclick="updateStatus('${dateStr}','${id}','Pago')">Pago</button>
-        <button class="btn ghost" onclick="updateStatus('${dateStr}','${id}','Pendente')">Pendente</button>
-        <button class="btn danger" onclick="removeParticipant('${dateStr}','${id}')">Remover</button>
+        <button class="btn ghost" type="button" data-action="status" data-status="Pago" data-date="${dateStr}" data-id="${id}">Pago</button>
+        <button class="btn ghost" type="button" data-action="status" data-status="Pendente" data-date="${dateStr}" data-id="${id}">Pendente</button>
+        <button class="btn danger" type="button" data-action="remove" data-date="${dateStr}" data-id="${id}">Remover</button>
       </div>
     </div>
   `;
@@ -407,6 +506,12 @@ window.showTab = (tab) => {
   if(tab === "cadastro") wireCadastro();
 };
 
+  document.getElementById(map[tab]).classList.add("active");
+
+  if(tab === "faturamento") refreshFaturamento();
+  if(tab === "cadastro") wireCadastro();
+};
+
 
 
 let cadastroWired = false;
@@ -433,12 +538,7 @@ const q = query(collection(db, "cadastro"), orderBy("updatedAt","desc"));
     });
 
     const mapById = new Map(rows.map(r => [r.id, r]));
-    window.openCadModalFromRow = (id) => {
-      const obj = mapById.get(id);
-      if(!obj) return toast("Cadastro não encontrado.");
-      openCadModal(id, obj);
-    };
-
+    window.__cadMap = mapById;
     function render(filter=""){
       const f = filter.trim().toLowerCase();
       const filtered = !f ? rows : rows.filter(r =>
@@ -466,9 +566,9 @@ cadListEl.innerHTML = filtered.map(r => `
           <div class="cadActions">
             ${r.telefone ? `<a class="btn ghost linkbtn" href="https://wa.me/${normalizePhone(r.telefone).startsWith('55')?normalizePhone(r.telefone):('55'+normalizePhone(r.telefone))}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
             ${r.instagram ? `<a class="btn ghost linkbtn" href="https://instagram.com/${encodeURIComponent(String(r.instagram).trim().replace(/^@/,''))}" target="_blank" rel="noopener">Instagram</a>` : ``}
-            <button class="btn ghost" onclick="copyText(buildContactText(r))">Copiar</button>
-            <button class="btn ghost" onclick="toggleVip('${r.id}', ${!r.vip})">${r.vip ? "Remover VIP" : "Marcar VIP"}</button>
-            <button class="btn" onclick="openCadModalFromRow('${r.id}')">Editar</button>
+            <button class="btn ghost" type="button" data-action="cad-copy" data-id="${r.id}">Copiar</button>
+            <button class="btn ghost" type="button" data-action="cad-vip" data-id="${r.id}">${r.vip ? "Remover VIP" : "Marcar VIP"}</button>
+            <button class="btn" type="button" data-action="cad-edit" data-id="${r.id}">Editar</button>
           </div>
         </div>
       `).join("");
@@ -776,6 +876,8 @@ html, body{ height:100%; }
 body{
   margin:0;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
   background: radial-gradient(1200px 600px at 20% 10%, rgba(225,6,0,.18), transparent 55%),
               radial-gradient(900px 500px at 80% 30%, rgba(255,255,255,.06), transparent 60%),
               var(--bg);
@@ -803,6 +905,9 @@ body{
 }
 .btn:hover{ background: var(--brand2); }
 .btn:active{ transform: translateY(1px); }
+.btn:focus-visible, .navBtn:focus-visible, .tab:focus-visible, .iconBtn:focus-visible, .day:focus-visible, .dayLine:focus-visible{ outline: 2px solid rgba(225,6,0,.65); outline-offset: 2px; }
+.btn[disabled]{ opacity: .55; cursor: not-allowed; }
+
 .btn.ghost{
   background: rgba(255,255,255,.06);
   border: 1px solid var(--border);
@@ -1165,7 +1270,7 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
     <input id="email" class="input" placeholder="Email" />
     <div style="height:10px"></div>
     <input id="senha" class="input" type="password" placeholder="Senha" />
-    <button class="btn" onclick="window.doLogin()">Entrar</button>
+    <button id="btnLogin" class="btn" type="button">Entrar</button>
   </div>
 </div>
 
@@ -1178,11 +1283,11 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
       </div>
       <div class="actions">
         <div class="tabs">
-          <button id="tabReserva" class="tab active" onclick="window.showTab('reserva')">Reserva</button>
-          <button id="tabFaturamento" class="tab" onclick="window.showTab('faturamento')">Faturamento</button>
-          <button id="tabCadastro" class="tab" onclick="window.showTab('cadastro')">Cadastro</button>
+          <button id="tabReserva" class="tab active" >Reserva</button>
+          <button id="tabFaturamento" class="tab" >Faturamento</button>
+          <button id="tabCadastro" class="tab" onclick="showTab(\'cadastro\')">Cadastro</button>
         </div>
-        <button class="btn ghost" onclick="window.logout()">Sair</button>
+        <button id="btnLogout" class="btn ghost" type="button">Sair</button>
       </div>
     </div>
   </div>
@@ -1194,9 +1299,9 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
           <div class="cardHeader">
             <h2>Calendário</h2>
             <div class="monthNav">
-              <button class="navBtn" onclick="prevMonth()" title="Mês anterior">◀</button>
+              <button id="btnPrevMonth" class="navBtn" type="button" title="Mês anterior">◀</button>
               <div class="monthTitle" id="monthLabel">Janeiro 2026</div>
-              <button class="navBtn" onclick="nextMonth()" title="Próximo mês">▶</button>
+              <button id="btnNextMonth" class="navBtn" type="button" title="Próximo mês">▶</button>
             </div>
           </div>
           <div class="calendarWrap">
@@ -1212,7 +1317,7 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
                 <h3>Reserva do dia</h3>
                 <p>Data: <b id="selectedDate">—</b> • <span id="dayStats">Selecione um dia.</span></p>
               </div>
-              <button class="btn ghost" onclick="closeDayPanel()">Fechar</button>
+              <button id="btnCloseDay" class="btn ghost" type="button">Fechar</button>
             </div>
 
             <div class="sectionLabel">Adicionar</div>
@@ -1239,7 +1344,7 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
                 </div>
               </div>
 
-              <button class="btn" onclick="addParticipant()">Adicionar</button>
+              <button id="btnAddParticipant" class="btn" type="button">Adicionar</button>
             </div>
 
             <div class="stack">
@@ -1265,9 +1370,9 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
         <div class="cardHeader">
           <h2>Faturamento Mensal</h2>
           <div class="monthNav">
-            <button class="navBtn" onclick="prevMonth()" title="Mês anterior">◀</button>
+            <button id="btnPrevMonthFat" class="navBtn" type="button" title="Mês anterior">◀</button>
             <div class="monthTitle" id="fatMonthLabel">Janeiro 2026</div>
-            <button class="navBtn" onclick="nextMonth()" title="Próximo mês">▶</button>
+            <button id="btnNextMonthFat" class="navBtn" type="button" title="Próximo mês">▶</button>
           </div>
         </div>
 
@@ -1342,7 +1447,7 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
         <div class="modalTitle">Editar cadastro</div>
         <div class="modalSub" id="cadModalSub">Atualize os dados do contato</div>
       </div>
-      <button class="btn ghost" onclick="closeCadModal()">Fechar</button>
+      <button id="btnCadModalClose" class="btn ghost" type="button">Fechar</button>
     </div>
 
     <div class="modalBody">
@@ -1359,10 +1464,10 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
       </label>
 
       <div class="modalActions">
-        <button class="btn danger" onclick="deleteCad()">Excluir</button>
+        <button id="btnCadDelete" class="btn danger" type="button">Excluir</button>
         <div style="flex:1"></div>
-        <button class="btn ghost" onclick="closeCadModal()">Cancelar</button>
-        <button class="btn" onclick="saveCad()">Salvar</button>
+        <button id="btnCadCancel" class="btn ghost" type="button">Cancelar</button>
+        <button id="btnCadSave" class="btn" type="button">Salvar</button>
       </div>
     </div>
   </div>
