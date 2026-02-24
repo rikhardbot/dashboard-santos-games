@@ -14,16 +14,13 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -66,6 +63,27 @@ function toast(msg){
   setTimeout(()=>t.classList.remove("show"), 2400);
 }
 
+
+async function copyText(text){
+  try{
+    if(!text) return toast("Sem contato para copiar.");
+    await navigator.clipboard.writeText(text);
+    toast("Contato copiado!");
+  }catch(e){
+    // Fallback: cria textarea
+    try{
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      toast("Contato copiado!");
+    }catch(_){
+      toast("Não foi possível copiar.");
+    }
+  }
+}
 function monthLabelText(){
   return `${meses[currentMonth]} 2026`;
 }
@@ -113,7 +131,7 @@ function renderCalendar(){
 }
 
 function wireDayBadge(dateStr){
-  onSnapshot(collection(db, "corujoes", dateStr, "participantes"), snap => {
+  onSnapshot(query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc")), snap => {
     const badge = document.getElementById("badge-" + dateStr);
     if(!badge) return;
     const count = snap.size;
@@ -128,40 +146,73 @@ window.openDay = (dateStr) => {
   selectedDate.textContent = dateStr;
   dayPanel.classList.add("open");
 
-  onSnapshot(collection(db, "corujoes", dateStr, "participantes"), snap => {
-    list.innerHTML = "";
-    let i = 0;
+  
+onSnapshot(query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc")), snap => {
+    const docs = [];
+    snap.forEach(d => docs.push(d));
 
-    snap.forEach(docSnap => {
-      const d = docSnap.data();
-      const isConfirmado = i < 10;
+    const confirmados = docs.slice(0, 10);
+    const espera = docs.slice(10);
 
-      list.innerHTML += `
-        <div class="row ${isConfirmado ? "confirmado" : "espera"}">
-          <div class="rowLeft">
-            <div class="name">${escapeHtml(d.nome)}</div>
-            <div class="meta">
-              <span class="pill">R$${Number(d.valor)}</span>
-              <span class="pill ${d.status === "Pago" ? "ok" : "warn"}">${d.status}</span>
-              ${isConfirmado ? `<span class="tag ok">Confirmado</span>` : `<span class="tag warn">Espera</span>`}
-            </div>
-          </div>
-          <div class="rowActions">
-            <button class="btn ghost" onclick="updateStatus('${dateStr}','${docSnap.id}','Pago')">Pago</button>
-            <button class="btn ghost" onclick="updateStatus('${dateStr}','${docSnap.id}','Pendente')">Pendente</button>
-            <button class="btn danger" onclick="removeParticipant('${dateStr}','${docSnap.id}')">Remover</button>
-          </div>
-        </div>
-      `;
-      i++;
-    });
+    confCount.textContent = `${confirmados.length}/10`;
+    esperaCount.textContent = `${espera.length}`;
 
-    const total = snap.size;
-    const conf = Math.min(total, 10);
-    const espera = Math.max(0, total - 10);
-    dayStats.textContent = `Confirmados: ${conf}/10 • Espera: ${espera}`;
-  });
+    // Confirmados
+    confList.innerHTML = "";
+    if(confirmados.length === 0){
+        confList.innerHTML = `<div class="emptyState">Nenhuma reserva confirmada ainda.</div>`;
+    } else {
+        confirmados.forEach(docSnap => {
+            const d = docSnap.data();
+            confList.innerHTML += rowHtml(dateStr, docSnap.id, d, true);
+        });
+    }
+
+    // Espera
+    esperaList.innerHTML = "";
+    if(espera.length === 0){
+        esperaList.innerHTML = `<div class="emptyState">Sem pessoas na lista de espera.</div>`;
+    } else {
+        espera.forEach(docSnap => {
+            const d = docSnap.data();
+            esperaList.innerHTML += rowHtml(dateStr, docSnap.id, d, false);
+        });
+    }
+
+    dayStats.textContent = `Confirmados: ${confirmados.length}/10 • Espera: ${espera.length}`;
+});
+
 };
+
+
+function rowHtml(dateStr, id, d, isConfirmado){
+  return `
+    <div class="row ${isConfirmado ? "confirmado" : "espera"}">
+      <div class="rowLeft">
+        <div class="name">${escapeHtml(d.nome)}</div>
+        <div class="contact">
+          ${d.telefone ? `<span class="pill subtle">📞 ${escapeHtml(d.telefone)}</span>` : ``}
+          ${d.instagram ? `<span class="pill subtle">📷 ${escapeHtml(d.instagram)}</span>` : ``}
+        </div>
+        <div class="meta">
+          <span class="pill">R$${Number(d.valor)}</span>
+          <span class="pill ${d.status === "Pago" ? "ok" : "warn"}">${d.status}</span>
+          ${isConfirmado ? `<span class="tag ok">Confirmado</span>` : `<span class="tag warn">Espera</span>`}
+        </div>
+      </div>
+      <div class="rowActions">
+        ${!isConfirmado ? `
+          <button class="btn ghost" onclick="copyText(buildContactText(d))">Copiar contato</button>
+          ${buildWhatsAppLink(d) ? `<a class="btn ghost linkbtn" href="${buildWhatsAppLink(d)}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
+          ${buildInstagramLink(d) ? `<a class="btn ghost linkbtn" href="${buildInstagramLink(d)}" target="_blank" rel="noopener">Instagram</a>` : ``}
+        ` : ``}
+        <button class="btn ghost" onclick="updateStatus('${dateStr}','${id}','Pago')">Pago</button>
+        <button class="btn ghost" onclick="updateStatus('${dateStr}','${id}','Pendente')">Pendente</button>
+        <button class="btn danger" onclick="removeParticipant('${dateStr}','${id}')">Remover</button>
+      </div>
+    </div>
+  `;
+}
 
 window.closeDayPanel = () => {
   dayPanel.classList.remove("open");
@@ -171,13 +222,24 @@ window.addParticipant = async () => {
   if(!selectedDateStr) return toast("Selecione um dia no calendário.");
 
   const nome = newName.value.trim();
+  const telefone = (newPhone?.value || "").trim();
+  const instagram = (newInsta?.value || "").trim();
   const valor = document.querySelector('input[name="valor"]:checked')?.value;
   const status = document.querySelector('input[name="status"]:checked')?.value;
 
-  if(!nome) return toast("Digite o nome do participante.");
+if(!nome) return toast("Digite o nome do participante.");
 
-  await addDoc(collection(db, "corujoes", selectedDateStr, "participantes"), { nome, valor, status });
+  await addDoc(collection(db, "corujoes", selectedDateStr, "participantes"), {
+    nome,
+    telefone,
+    instagram,
+    valor,
+    status,
+    createdAt: Date.now()
+  });
   newName.value = "";
+  if(newPhone) newPhone.value = "";
+  if(newInsta) newInsta.value = "";
 };
 
 window.updateStatus = async (dateStr, id, status) => {
@@ -368,6 +430,36 @@ function formatBRLShort(n){
   if(v === 0) return "R$0";
   return "R$" + v.toLocaleString("pt-BR");
 }
+
+
+function normalizePhone(phone){
+  // Mantém apenas dígitos (ex: 11 9xxxx-xxxx -> 119xxxxxxxx)
+  return String(phone || "").replace(/\D/g, "");
+}
+function buildWhatsAppLink(d){
+  const digits = normalizePhone(d?.telefone);
+  if(!digits) return null;
+  // Se o usuário não colocar DDI, assume Brasil (55)
+  const number = digits.startsWith("55") ? digits : ("55" + digits);
+  const text = `Olá, aqui é da Santos Games Arena. Sua vaga no Corujão (${selectedDateStr || "data"}) ficou disponível. Confirma presença?`;
+  return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+}
+function buildInstagramLink(d){
+  const raw = String(d?.instagram || "").trim();
+  if(!raw) return null;
+  const handle = raw.replace(/^@/, "").replace(/\s+/g,"");
+  if(!handle) return null;
+  return `https://instagram.com/${encodeURIComponent(handle)}`;
+}
+
+function buildContactText(d){
+  const parts = [];
+  if(d?.nome) parts.push(d.nome);
+  if(d?.telefone) parts.push("Telefone: " + d.telefone);
+  if(d?.instagram) parts.push("Instagram: " + d.instagram);
+  return parts.join(" • ");
+}
+
 function escapeHtml(str){
   return String(str).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
     .replaceAll('"',"&quot;").replaceAll("'","&#039;");
@@ -548,6 +640,8 @@ body{
 .tag.ok{ background: rgba(34,197,94,.16); color:#caffdd; }
 .tag.warn{ background: rgba(225,6,0,.16); color:#ffd0d0; }
 .rowActions{ display:flex; gap: 8px; flex-wrap:wrap; justify-content:flex-end; }
+.rowActions .btn{ padding: 8px 10px; }
+a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
 
 @media (max-width: 980px){
   .side{ position: fixed; inset: 0; display:none; z-index: 20; background: rgba(0,0,0,.55); }
@@ -632,6 +726,18 @@ body{
 .mini{ font-size: 12px; color: var(--muted); }
 .mini.ok{ color: #caffdd; }
 .mini.warn{ color: #ffd0d6; }
+
+.stack{ margin-top: 10px; display:grid; gap:10px; }
+.stackHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.stackHeader h4{ margin:0; font-size: 12px; letter-spacing:.08em; text-transform: uppercase; color: var(--muted); }
+.stackHeader .count{ padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04); color: var(--muted); font-size: 12px; }
+.emptyState{ padding: 10px 12px; border-radius: 14px; border: 1px dashed rgba(255,255,255,.14); color: var(--muted2); background: rgba(255,255,255,.03); font-size: 13px; }
+
+
+.twoInputs{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 520px){ .twoInputs{ grid-template-columns: 1fr; } }
+.contact{ display:flex; gap: 6px; flex-wrap:wrap; margin: 2px 0 6px; }
+
 </style>
 </head>
 
@@ -695,6 +801,10 @@ body{
             <div class="sectionLabel">Adicionar</div>
             <div class="formRow">
               <input id="newName" class="input" placeholder="Nome do participante" />
+              <div class="twoInputs">
+                <input id="newPhone" class="input" inputmode="tel" placeholder="Telefone (opcional)" />
+                <input id="newInsta" class="input" placeholder="Instagram (opcional)" />
+              </div>
 
               <div>
                 <div class="sectionLabel" style="margin-top:0;">Valor</div>
@@ -715,8 +825,19 @@ body{
               <button class="btn" onclick="addParticipant()">Adicionar</button>
             </div>
 
-            <div class="sectionLabel">Lista</div>
-            <div id="list" class="list"></div>
+            <div class="stack">
+              <div class="stackHeader">
+                <h4>Confirmados</h4>
+                <span class="count" id="confCount">0/10</span>
+              </div>
+              <div id="confList" class="list"></div>
+
+              <div class="stackHeader" style="margin-top:6px;">
+                <h4>Lista de espera</h4>
+                <span class="count" id="esperaCount">0</span>
+              </div>
+              <div id="esperaList" class="list"></div>
+            </div>
           </div>
         </div>
       </div>
