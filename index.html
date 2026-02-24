@@ -18,12 +18,9 @@ import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc
 
 // 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -362,13 +359,24 @@ window.removeParticipant = async (dateStr, id) => {
 };
 
 
+
 window.showTab = (tab) => {
-  reserva.style.display = tab === "reserva" ? "block" : "none";
-  faturamento.style.display = tab === "faturamento" ? "block" : "none";
-  cadastro.style.display = tab === "cadastro" ? "block" : "none";
+  const reservaEl = document.getElementById("reserva");
+  const faturamentoEl = document.getElementById("faturamento");
+  const cadastroEl = document.getElementById("cadastro");
+
+  reservaEl.style.display = tab === "reserva" ? "block" : "none";
+  faturamentoEl.style.display = tab === "faturamento" ? "block" : "none";
+  cadastroEl.style.display = tab === "cadastro" ? "block" : "none";
 
   document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
   const map = { reserva: "tabReserva", faturamento: "tabFaturamento", cadastro: "tabCadastro" };
+  document.getElementById(map[tab]).classList.add("active");
+
+  if(tab === "faturamento") refreshFaturamento();
+  if(tab === "cadastro") wireCadastro();
+};
+
   document.getElementById(map[tab]).classList.add("active");
 
   if(tab === "faturamento") refreshFaturamento();
@@ -382,7 +390,10 @@ function wireCadastro(){
   if(cadastroWired) return;
   cadastroWired = true;
 
-  const q = query(collection(db, "cadastro"), orderBy("updatedAt","desc"));
+  const cadListEl = document.getElementById("cadList");
+  const cadSearchEl = document.getElementById("cadSearch");
+
+const q = query(collection(db, "cadastro"), orderBy("updatedAt","desc"));
   onSnapshot(q, snap => {
     const rows = [];
     snap.forEach(docSnap => {
@@ -413,12 +424,12 @@ function wireCadastro(){
       );
 
       if(filtered.length === 0){
-        cadList.innerHTML = `<div class="emptyState">Nenhum cadastro encontrado.</div>`;
+        cadListEl.innerHTML = `<div class="emptyState">Nenhum cadastro encontrado.</div>`;
         return;
       }
 
       
-cadList.innerHTML = filtered.map(r => `
+cadListEl.innerHTML = filtered.map(r => `
         <div class="cadRow">
           <div class="cadLeft">
             <div class="cadName">${escapeHtml(r.nome)} ${r.vip ? `<span class="vipBadge">VIP</span>` : ``}</div>
@@ -440,9 +451,9 @@ cadList.innerHTML = filtered.map(r => `
 
     }
 
-    render(cadSearch?.value || "");
-    if(cadSearch){
-      cadSearch.oninput = () => render(cadSearch.value || "");
+    render(cadSearchEl?.value || "");
+    if(cadSearchEl){
+      cadSearchEl.oninput = () => render(cadSearchEl.value || "");
     }
   });
 }
