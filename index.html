@@ -1,227 +1,782 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>DashBoard Santos Games Corujões 2026</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+// 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-let currentMonth = 0; // Janeiro
 const year = 2026;
+let currentMonth = 0; // 0 = Janeiro
+let selectedDateStr = null;
+
+const meses = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+let faturamentoChart = null;
+let mixChart = null;
+let ocupacaoChart = null;
 
 onAuthStateChanged(auth, (user) => {
-  if(user){
-    document.getElementById("login").style.display="none";
-    document.getElementById("app").style.display="block";
+  if (user) {
+    document.getElementById("login").style.display = "none";
+    document.getElementById("app").style.display = "block";
     renderCalendar();
+    showTab("reserva");
   }
 });
 
 window.login = () => {
-  signInWithEmailAndPassword(auth,
-    email.value, senha.value
-  ).catch(()=>alert("Erro ao logar"));
+  signInWithEmailAndPassword(auth, email.value, senha.value)
+    .catch(() => toast("Usuário ou senha inválidos."));
+};
+
+window.logout = () => {
+  signOut(auth);
+  location.reload();
+};
+
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 2400);
 }
 
-window.logout = () => { signOut(auth); location.reload(); }
+function monthLabelText(){
+  return `${meses[currentMonth]} 2026`;
+}
 
-const meses = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+window.prevMonth = () => {
+  if (currentMonth > 0) {
+    currentMonth--;
+    renderCalendar();
+    if (document.getElementById("faturamento").style.display !== "none") refreshFaturamento();
+  }
+};
+
+window.nextMonth = () => {
+  if (currentMonth < 11) {
+    currentMonth++;
+    renderCalendar();
+    if (document.getElementById("faturamento").style.display !== "none") refreshFaturamento();
+  }
+};
 
 function renderCalendar(){
-  monthLabel.innerText = meses[currentMonth] + " 2026";
-  calendar.innerHTML="";
-  diasSemana.innerHTML="";
-  ["S","T","Q","Q","S","S","D"].forEach(d=>{
-    diasSemana.innerHTML+=`<div class="semana">${d}</div>`;
+  monthLabel.textContent = monthLabelText();
+
+  diasSemana.innerHTML = "";
+  ["D","S","T","Q","Q","S","S"].forEach(d => {
+    diasSemana.innerHTML += `<div class="dow">${d}</div>`;
   });
 
-  const firstDay = new Date(year,currentMonth,1).getDay();
-  const totalDays = new Date(year,currentMonth+1,0).getDate();
+  calendar.innerHTML = "";
 
-  for(let i=0;i<firstDay;i++) calendar.innerHTML+="<div></div>";
+  const firstDay = new Date(year, currentMonth, 1).getDay(); // 0=Dom
+  const totalDays = new Date(year, currentMonth + 1, 0).getDate();
 
-  for(let d=1; d<=totalDays; d++){
-    const dateStr = year+"-"+String(currentMonth+1).padStart(2,'0')+"-"+String(d).padStart(2,'0');
-    calendar.innerHTML+=`
-      <div class="day" onclick="openDay('${dateStr}')">
-        ${d}
-        <div id="badge-${dateStr}" class="badge"></div>
-      </div>`;
-    loadCount(dateStr);
+  for (let i = 0; i < firstDay; i++) calendar.innerHTML += `<div class="empty"></div>`;
+
+  for (let d = 1; d <= totalDays; d++) {
+    const dateStr = `${year}-${String(currentMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    calendar.innerHTML += `
+      <button class="day" type="button" onclick="openDay('${dateStr}')">
+        <span class="dayNum">${d}</span>
+        <span id="badge-${dateStr}" class="badge"></span>
+      </button>`;
+    wireDayBadge(dateStr);
   }
 }
 
-window.prevMonth=()=>{ if(currentMonth>0){ currentMonth--; renderCalendar(); } }
-window.nextMonth=()=>{ if(currentMonth<11){ currentMonth++; renderCalendar(); } }
+function wireDayBadge(dateStr){
+  onSnapshot(collection(db, "corujoes", dateStr, "participantes"), snap => {
+    const badge = document.getElementById("badge-" + dateStr);
+    if(!badge) return;
+    const count = snap.size;
+    badge.textContent = `${count}/10`;
+    badge.classList.toggle("full", count >= 10);
+    badge.classList.toggle("has", count > 0);
+  });
+}
 
-function loadCount(dateStr){
-  onSnapshot(collection(db,"corujoes",dateStr,"participantes"), snap=>{
-    const badge=document.getElementById("badge-"+dateStr);
-    if(badge){
-      badge.innerText=snap.size+"/10";
-      if(snap.size>=10) badge.style.background="#e10600";
+window.openDay = (dateStr) => {
+  selectedDateStr = dateStr;
+  selectedDate.textContent = dateStr;
+  dayPanel.classList.add("open");
+
+  onSnapshot(collection(db, "corujoes", dateStr, "participantes"), snap => {
+    list.innerHTML = "";
+    let i = 0;
+
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      const isConfirmado = i < 10;
+
+      list.innerHTML += `
+        <div class="row ${isConfirmado ? "confirmado" : "espera"}">
+          <div class="rowLeft">
+            <div class="name">${escapeHtml(d.nome)}</div>
+            <div class="meta">
+              <span class="pill">R$${Number(d.valor)}</span>
+              <span class="pill ${d.status === "Pago" ? "ok" : "warn"}">${d.status}</span>
+              ${isConfirmado ? `<span class="tag ok">Confirmado</span>` : `<span class="tag warn">Espera</span>`}
+            </div>
+          </div>
+          <div class="rowActions">
+            <button class="btn ghost" onclick="updateStatus('${dateStr}','${docSnap.id}','Pago')">Pago</button>
+            <button class="btn ghost" onclick="updateStatus('${dateStr}','${docSnap.id}','Pendente')">Pendente</button>
+            <button class="btn danger" onclick="removeParticipant('${dateStr}','${docSnap.id}')">Remover</button>
+          </div>
+        </div>
+      `;
+      i++;
+    });
+
+    const total = snap.size;
+    const conf = Math.min(total, 10);
+    const espera = Math.max(0, total - 10);
+    dayStats.textContent = `Confirmados: ${conf}/10 • Espera: ${espera}`;
+  });
+};
+
+window.closeDayPanel = () => {
+  dayPanel.classList.remove("open");
+};
+
+window.addParticipant = async () => {
+  if(!selectedDateStr) return toast("Selecione um dia no calendário.");
+
+  const nome = newName.value.trim();
+  const valor = document.querySelector('input[name="valor"]:checked')?.value;
+  const status = document.querySelector('input[name="status"]:checked')?.value;
+
+  if(!nome) return toast("Digite o nome do participante.");
+
+  await addDoc(collection(db, "corujoes", selectedDateStr, "participantes"), { nome, valor, status });
+  newName.value = "";
+};
+
+window.updateStatus = async (dateStr, id, status) => {
+  await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status });
+};
+
+window.removeParticipant = async (dateStr, id) => {
+  await deleteDoc(doc(db, "corujoes", dateStr, "participantes", id));
+};
+
+window.showTab = (tab) => {
+  reserva.style.display = tab === "reserva" ? "block" : "none";
+  faturamento.style.display = tab === "faturamento" ? "block" : "none";
+
+  document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+  document.getElementById(tab === "reserva" ? "tabReserva" : "tabFaturamento").classList.add("active");
+
+  if(tab === "faturamento"){
+    refreshFaturamento();
+  }
+};
+
+async function refreshFaturamento(){
+  fatMonthLabel.textContent = monthLabelText();
+
+  const daysInMonth = new Date(year, currentMonth + 1, 0).getDate();
+  const labels = [];
+  const paidByDay = [];
+  const pendingByDay = [];
+
+  let paidTotal = 0;
+  let pendingTotal = 0;
+  let paidCount = 0;
+  let pendingCount = 0;
+
+  // Mix 100/140 (receita total + por status)
+  let total100 = 0, total140 = 0;
+  let pago100 = 0, pago140 = 0;
+  let pend100 = 0, pend140 = 0;
+
+  // Ocupação (contagem no mês)
+  let confirmadosMes = 0;
+  let esperaMes = 0;
+
+  for(let d = 1; d <= daysInMonth; d++){
+    const dateStr = `${year}-${String(currentMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    labels.push(String(d));
+
+    let paid = 0;
+    let pend = 0;
+
+    const snap = await getDocs(collection(db, "corujoes", dateStr, "participantes"));
+
+    // Ocupação por dia (confirmados/espera)
+    const totalDiaCount = snap.size;
+    confirmadosMes += Math.min(totalDiaCount, 10);
+    esperaMes += Math.max(0, totalDiaCount - 10);
+
+    snap.forEach(docSnap => {
+      const data = docSnap.data();
+      const v = Number(data.valor || 0);
+
+      // Mix 100/140
+      if(v === 100) total100 += 100;
+      if(v === 140) total140 += 140;
+
+      if(data.status === "Pago"){
+        paid += v; paidTotal += v; paidCount += 1;
+        if(v === 100) pago100 += 100;
+        if(v === 140) pago140 += 140;
+      } else {
+        pend += v; pendingTotal += v; pendingCount += 1;
+        if(v === 100) pend100 += 100;
+        if(v === 140) pend140 += 140;
+      }
+    });
+
+    paidByDay.push(paid);
+    pendingByDay.push(pend);
+  }
+
+  // Cards
+  fatReceitaPaga.textContent = formatBRL(paidTotal);
+  fatReceitaPendente.textContent = formatBRL(pendingTotal);
+  fatQtdPagos.textContent = String(paidCount);
+  fatQtdPendentes.textContent = String(pendingCount);
+
+  // Mix cards
+  fatMix100.textContent = formatBRL(total100);
+  fatMix140.textContent = formatBRL(total140);
+  fatMixPago.textContent = formatBRL(paidTotal);
+  fatMixPotencial.textContent = formatBRL(paidTotal + pendingTotal);
+
+  // Ocupação cards
+  fatConfMes.textContent = String(confirmadosMes);
+  fatEsperaMes.textContent = String(esperaMes);
+
+  // Tabela por dia (clicável)
+  fatDays.innerHTML = "";
+  for(let i=0;i<labels.length;i++){
+    const dd = labels[i];
+    const totalDia = paidByDay[i] + pendingByDay[i];
+    const badge = totalDia > 0 ? `<span class="pill">R$${totalDia.toLocaleString("pt-BR")}</span>` : `<span class="pill subtle">—</span>`;
+    fatDays.innerHTML += `
+      <button class="dayLine" type="button" onclick="openDay('${year}-${String(currentMonth+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}')">
+        <span>Dia ${dd}</span>
+        <span class="right">
+          <span class="mini ok">Pago: ${formatBRLShort(paidByDay[i])}</span>
+          <span class="mini warn">Pendente: ${formatBRLShort(pendingByDay[i])}</span>
+          ${badge}
+        </span>
+      </button>`;
+  }
+
+  // Gráfico principal (barras empilhadas por dia)
+  const ctx = document.getElementById("fatChart");
+  if(faturamentoChart) faturamentoChart.destroy();
+  faturamentoChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Pago (R$)", data: paidByDay },
+        { label: "Pendente (R$)", data: pendingByDay }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "top" }, tooltip: { mode: "index", intersect: false } },
+      interaction: { mode: "index", intersect: false },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+    }
+  });
+
+  // Gráfico Mix (100 vs 140) — receita total do mês por tipo
+  const ctxMix = document.getElementById("fatMixChart");
+  if(mixChart) mixChart.destroy();
+  mixChart = new Chart(ctxMix, {
+    type: "doughnut",
+    data: {
+      labels: ["R$100", "R$140"],
+      datasets: [{ data: [total100, total140] }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: {
+          callbacks: {
+            label: (item) => `${item.label}: ${formatBRL(item.raw)}`
+          }
+        }
+      }
+    }
+  });
+
+  // Gráfico Ocupação — confirmados vs espera no mês
+  const ctxOcc = document.getElementById("fatOccChart");
+  if(ocupacaoChart) ocupacaoChart.destroy();
+  ocupacaoChart = new Chart(ctxOcc, {
+    type: "doughnut",
+    data: {
+      labels: ["Confirmados", "Espera"],
+      datasets: [{ data: [confirmadosMes, esperaMes] }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: {
+          callbacks: {
+            label: (item) => `${item.label}: ${item.raw}`
+          }
+        }
+      }
     }
   });
 }
 
-window.openDay=(dateStr)=>{
-  selectedDate.innerText=dateStr;
-  dayPanel.style.display="block";
-
-  onSnapshot(collection(db,"corujoes",dateStr,"participantes"), snap=>{
-    list.innerHTML="";
-    let i=0;
-    snap.forEach(docSnap=>{
-      const d=docSnap.data();
-      list.innerHTML+=`
-        <div class="item ${i<10?'confirmado':'espera'}">
-          ${d.nome} - R$${d.valor} - ${d.status}
-          <button onclick="updateStatus('${dateStr}','${docSnap.id}','Pago')">Pago</button>
-          <button onclick="updateStatus('${dateStr}','${docSnap.id}','Pendente')">Pendente</button>
-          <button onclick="removeParticipant('${dateStr}','${docSnap.id}')">X</button>
-        </div>`;
-      i++;
-    });
-  });
+function formatBRL(n){
+  return (Number(n)||0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
-
-window.addParticipant=async()=>{
-  const dateStr=selectedDate.innerText;
-  const nome=newName.value;
-  const valor=document.querySelector('input[name="valor"]:checked').value;
-  const status=document.querySelector('input[name="status"]:checked').value;
-
-  if(!nome) return alert("Digite nome");
-
-  await addDoc(collection(db,"corujoes",dateStr,"participantes"),{
-    nome, valor, status
-  });
-  newName.value="";
+function formatBRLShort(n){
+  const v = Number(n)||0;
+  if(v === 0) return "R$0";
+  return "R$" + v.toLocaleString("pt-BR");
 }
-
-window.updateStatus=async(date,id,status)=>{
-  await updateDoc(doc(db,"corujoes",date,"participantes",id),{status});
-}
-
-window.removeParticipant=async(date,id)=>{
-  await deleteDoc(doc(db,"corujoes",date,"participantes",id));
-}
-
-window.exportMonth=async()=>{
-  let totalPago=0;
-  let totalPendente=0;
-  let csv="Data,Nome,Valor,Status\n";
-
-  for(let d=1; d<=31; d++){
-    const dateStr=year+"-"+String(currentMonth+1).padStart(2,'0')+"-"+String(d).padStart(2,'0');
-    const snap=await getDocs(collection(db,"corujoes",dateStr,"participantes"));
-    snap.forEach(docSnap=>{
-      const data=docSnap.data();
-      csv+=`${dateStr},${data.nome},${data.valor},${data.status}\n`;
-      if(data.status==="Pago") totalPago+=Number(data.valor);
-      else totalPendente+=Number(data.valor);
-    });
-  }
-
-  const blob=new Blob([csv],{type:"text/csv"});
-  const link=document.createElement("a");
-  link.href=URL.createObjectURL(blob);
-  link.download=meses[currentMonth]+"_2026.csv";
-  link.click();
-
-  alert("Pago: R$"+totalPago+" | Pendente: R$"+totalPendente);
-}
-
-window.showTab=(tab)=>{
-  reserva.style.display=tab==="reserva"?"block":"none";
-  faturamento.style.display=tab==="faturamento"?"block":"none";
+function escapeHtml(str){
+  return String(str).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;").replaceAll("'","&#039;");
 }
 </script>
 
 <style>
-body{margin:0;background:#0f0f0f;color:white;font-family:Arial;}
-header{background:#e10600;padding:15px;text-align:center;font-weight:bold;}
-.tabs{display:flex;justify-content:center;gap:20px;padding:10px;}
-.tabs button{padding:8px 20px;background:#222;color:white;border:none;}
-.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
-.day{background:#1a1a1a;padding:15px;border-radius:6px;cursor:pointer;position:relative;}
-.day:hover{background:#2a2a2a;}
-.badge{position:absolute;bottom:5px;right:5px;font-size:11px;background:#333;padding:2px 6px;border-radius:10px;}
-.semana{text-align:center;font-weight:bold;}
-.item{padding:6px;margin:5px 0;background:#222;border-radius:5px;}
-.confirmado{border-left:4px solid #00aa00;}
-.espera{border-left:4px solid #e10600;}
+:root{
+  --bg: #0b0b0f;
+  --border: rgba(255,255,255,.10);
+  --text: rgba(255,255,255,.92);
+  --muted: rgba(255,255,255,.70);
+  --muted2: rgba(255,255,255,.52);
+  --brand: #e10600;
+  --brand2: #b00500;
+  --shadow: 0 20px 60px rgba(0,0,0,.45);
+  --radius: 16px;
+}
+*{ box-sizing:border-box; }
+html, body{ height:100%; }
+body{
+  margin:0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: radial-gradient(1200px 600px at 20% 10%, rgba(225,6,0,.18), transparent 55%),
+              radial-gradient(900px 500px at 80% 30%, rgba(255,255,255,.06), transparent 60%),
+              var(--bg);
+  color: var(--text);
+}
+.topbar{
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(11,11,15,.65);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.topbarInner{
+  max-width: 1100px; margin: 0 auto; padding: 14px 16px;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+}
+.brand{ display:flex; flex-direction:column; line-height:1.1; }
+.brand b{ font-size: 14px; letter-spacing:.12em; text-transform: uppercase; }
+.brand span{ font-size: 12px; color: var(--muted2); }
+.actions{ display:flex; align-items:center; gap:10px; }
+.btn{
+  appearance:none; border:none; cursor:pointer;
+  border-radius: 12px; padding: 10px 12px; font-weight: 600;
+  color: white; background: var(--brand);
+  transition: transform .06s ease, background .15s ease;
+}
+.btn:hover{ background: var(--brand2); }
+.btn:active{ transform: translateY(1px); }
+.btn.ghost{
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.btn.ghost:hover{ background: rgba(255,255,255,.10); }
+.btn.danger{
+  background: rgba(244,63,94,.16);
+  border: 1px solid rgba(244,63,94,.35);
+  color: #ffd0d6;
+}
+.btn.danger:hover{ background: rgba(244,63,94,.24); }
+.wrap{ max-width: 1100px; margin: 0 auto; padding: 18px 16px 32px; }
+.tabs{
+  display:flex; gap:8px; padding: 6px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.tab{
+  border:none; cursor:pointer; padding: 10px 14px; border-radius: 12px;
+  background: transparent; color: var(--muted); font-weight: 600;
+}
+.tab.active{ background: rgba(225,6,0,.18); color: white; }
+
+.grid{ display:grid; grid-template-columns: 1.1fr .9fr; gap: 14px; margin-top: 14px; }
+@media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+
+.card{
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.cardHeader{
+  padding: 14px 14px 10px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+}
+.cardHeader h2{
+  margin:0; font-size: 14px; letter-spacing:.06em; text-transform: uppercase; color: var(--muted);
+}
+.monthNav{ display:flex; align-items:center; gap: 8px; }
+.monthTitle{ font-size: 18px; font-weight: 700; }
+.navBtn{
+  border:none; cursor:pointer; width: 38px; height: 38px; border-radius: 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.navBtn:hover{ background: rgba(255,255,255,.10); }
+
+.calendarWrap{ padding: 0 14px 14px; }
+.calendarGrid{ display:grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.dow{ text-align:center; font-weight: 700; font-size: 12px; color: var(--muted2); padding: 6px 0; }
+.empty{ min-height: 56px; }
+.day{
+  position:relative; text-align:left; min-height: 58px;
+  padding: 10px 10px 8px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+}
+.day:hover{ background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.14); }
+.dayNum{ font-weight: 700; font-size: 14px; }
+.badge{
+  position:absolute; right: 8px; bottom: 8px;
+  padding: 3px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.06);
+  color: var(--muted);
+  opacity: 0; transform: translateY(3px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+.badge.has{ opacity: 1; transform: translateY(0); }
+.badge.full{ background: rgba(225,6,0,.22); border-color: rgba(225,6,0,.38); color: #ffd0d0; }
+
+.side{ overflow:hidden; }
+.sideInner{ padding: 14px; }
+.sideTitle{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.sideTitle h3{ margin:0; font-size: 16px; }
+.sideTitle p{ margin: 3px 0 0; color: var(--muted2); font-size: 12px; }
+
+.formRow{ display:grid; grid-template-columns: 1fr; gap: 10px; margin-top: 10px; }
+.input{
+  width: 100%; padding: 11px 12px; border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,.25);
+  color: var(--text); outline: none;
+}
+.input:focus{ border-color: rgba(225,6,0,.50); box-shadow: 0 0 0 4px rgba(225,6,0,.12); }
+
+.choices{ display:flex; flex-wrap:wrap; gap: 8px; margin-top: 2px; }
+.choice{
+  display:flex; align-items:center; gap: 8px; padding: 8px 10px;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: rgba(255,255,255,.04); color: var(--muted); font-size: 12px;
+}
+.choice input{ accent-color: var(--brand); }
+
+.sectionLabel{
+  margin-top: 12px; font-size: 12px; color: var(--muted2);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.list{
+  margin-top: 10px; display:flex; flex-direction:column; gap: 10px;
+  max-height: 520px; overflow:auto; padding-right: 4px;
+}
+.row{
+  display:flex; gap: 10px; justify-content:space-between; align-items:flex-start;
+  padding: 12px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04);
+}
+.row.confirmado{ border-left: 4px solid rgba(34,197,94,.85); }
+.row.espera{ border-left: 4px solid rgba(225,6,0,.85); }
+.rowLeft{ min-width: 0; }
+.name{ font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+.meta{ display:flex; gap: 6px; flex-wrap:wrap; }
+
+.pill{
+  padding: 4px 8px; border-radius: 999px; font-size: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  color: var(--muted); background: rgba(255,255,255,.04);
+}
+.pill.ok{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.25); color:#caffdd; }
+.pill.warn{ background: rgba(244,63,94,.12); border-color: rgba(244,63,94,.25); color:#ffd0d6; }
+.pill.subtle{ opacity:.75; }
+.tag{ padding: 4px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.tag.ok{ background: rgba(34,197,94,.16); color:#caffdd; }
+.tag.warn{ background: rgba(225,6,0,.16); color:#ffd0d0; }
+.rowActions{ display:flex; gap: 8px; flex-wrap:wrap; justify-content:flex-end; }
+
+@media (max-width: 980px){
+  .side{ position: fixed; inset: 0; display:none; z-index: 20; background: rgba(0,0,0,.55); }
+  .side.open{ display:block; }
+  .sideInner{
+    position:absolute; left:0; right:0; bottom:0;
+    max-height: 85vh;
+    border-radius: 20px 20px 0 0;
+    background: rgba(15,15,20,.98);
+    border-top: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    overflow:auto;
+  }
+}
+
+.loginWrap{ min-height: 100%; display:flex; align-items:center; justify-content:center; padding: 20px; }
+.loginCard{
+  width: min(420px, 100%);
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+.loginCard h1{ margin:0; font-size: 18px; }
+.loginCard p{ margin:6px 0 14px; color: var(--muted2); font-size: 13px; }
+.loginCard .btn{ width: 100%; margin-top: 8px; }
+
+.toast{
+  position: fixed; left: 50%; bottom: 18px;
+  transform: translateX(-50%) translateY(12px);
+  opacity: 0; pointer-events: none;
+  background: rgba(10,10,14,.92);
+  border: 1px solid rgba(255,255,255,.14);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  transition: opacity .2s ease, transform .2s ease;
+  font-size: 13px;
+}
+.toast.show{ opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.stats{
+  display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+}
+@media (max-width: 980px){ .stats{ grid-template-columns: repeat(2, 1fr); } }
+
+.stat{
+  padding: 12px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.stat .k{ font-size: 12px; color: var(--muted2); text-transform: uppercase; letter-spacing:.08em; }
+.stat .v{ margin-top: 6px; font-weight: 800; font-size: 16px; }
+
+.chartBox{ height: 320px; padding: 12px; }
+
+.twoCharts{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 980px){
+  .twoCharts{ grid-template-columns: 1fr; }
+}
+.chartMini{ height: 260px; padding: 12px; }
+
+.dayLines{
+  display:flex; flex-direction:column; gap: 8px;
+  max-height: 340px; overflow:auto; padding-right: 4px;
+}
+.dayLine{
+  display:flex; align-items:center; justify-content:space-between; gap: 10px;
+  padding: 10px 12px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  color: var(--text); cursor:pointer;
+}
+.dayLine:hover{ background: rgba(255,255,255,.07); }
+.dayLine .right{ display:flex; gap: 10px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+.mini{ font-size: 12px; color: var(--muted); }
+.mini.ok{ color: #caffdd; }
+.mini.warn{ color: #ffd0d6; }
 </style>
 </head>
 
 <body>
-
-<div id="login" style="max-width:400px;margin:100px auto;">
-<h2>Santos Games 2026</h2>
-<input id="email" placeholder="Email"><br><br>
-<input id="senha" type="password" placeholder="Senha"><br><br>
-<button onclick="login()">Entrar</button>
+<div id="login" class="loginWrap">
+  <div class="loginCard">
+    <h1>Santos Games</h1>
+    <p>DashBoard Corujões • 2026</p>
+    <input id="email" class="input" placeholder="Email" />
+    <div style="height:10px"></div>
+    <input id="senha" class="input" type="password" placeholder="Senha" />
+    <button class="btn" onclick="login()">Entrar</button>
+  </div>
 </div>
 
 <div id="app" style="display:none;">
-<header>DashBoard Santos Games Corujões 2026</header>
+  <div class="topbar">
+    <div class="topbarInner">
+      <div class="brand">
+        <b>Santos Games</b>
+        <span>DashBoard Corujões • 2026</span>
+      </div>
+      <div class="actions">
+        <div class="tabs">
+          <button id="tabReserva" class="tab active" onclick="showTab('reserva')">Reserva</button>
+          <button id="tabFaturamento" class="tab" onclick="showTab('faturamento')">Faturamento</button>
+        </div>
+        <button class="btn ghost" onclick="logout()">Sair</button>
+      </div>
+    </div>
+  </div>
 
-<div class="tabs">
-<button onclick="showTab('reserva')">Reserva</button>
-<button onclick="showTab('faturamento')">Faturamento</button>
+  <div class="wrap">
+    <div id="reserva">
+      <div class="grid">
+        <div class="card">
+          <div class="cardHeader">
+            <h2>Calendário</h2>
+            <div class="monthNav">
+              <button class="navBtn" onclick="prevMonth()" title="Mês anterior">◀</button>
+              <div class="monthTitle" id="monthLabel">Janeiro 2026</div>
+              <button class="navBtn" onclick="nextMonth()" title="Próximo mês">▶</button>
+            </div>
+          </div>
+          <div class="calendarWrap">
+            <div id="diasSemana" class="calendarGrid"></div>
+            <div id="calendar" class="calendarGrid"></div>
+          </div>
+        </div>
+
+        <div id="dayPanel" class="card side">
+          <div class="sideInner">
+            <div class="sideTitle">
+              <div>
+                <h3>Reserva do dia</h3>
+                <p>Data: <b id="selectedDate">—</b> • <span id="dayStats">Selecione um dia.</span></p>
+              </div>
+              <button class="btn ghost" onclick="closeDayPanel()">Fechar</button>
+            </div>
+
+            <div class="sectionLabel">Adicionar</div>
+            <div class="formRow">
+              <input id="newName" class="input" placeholder="Nome do participante" />
+
+              <div>
+                <div class="sectionLabel" style="margin-top:0;">Valor</div>
+                <div class="choices">
+                  <label class="choice"><input type="radio" name="valor" value="100" checked />R$100</label>
+                  <label class="choice"><input type="radio" name="valor" value="140" />R$140</label>
+                </div>
+              </div>
+
+              <div>
+                <div class="sectionLabel" style="margin-top:0;">Status</div>
+                <div class="choices">
+                  <label class="choice"><input type="radio" name="status" value="Pago" />Pago</label>
+                  <label class="choice"><input type="radio" name="status" value="Pendente" checked />Pendente</label>
+                </div>
+              </div>
+
+              <button class="btn" onclick="addParticipant()">Adicionar</button>
+            </div>
+
+            <div class="sectionLabel">Lista</div>
+            <div id="list" class="list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="faturamento" style="display:none;">
+      <div class="card">
+        <div class="cardHeader">
+          <h2>Faturamento Mensal</h2>
+          <div class="monthNav">
+            <button class="navBtn" onclick="prevMonth()" title="Mês anterior">◀</button>
+            <div class="monthTitle" id="fatMonthLabel">Janeiro 2026</div>
+            <button class="navBtn" onclick="nextMonth()" title="Próximo mês">▶</button>
+          </div>
+        </div>
+
+        <div class="sideInner">
+          <div class="stats">
+            <div class="stat"><div class="k">Receita Paga</div><div class="v" id="fatReceitaPaga">R$0</div></div>
+            <div class="stat"><div class="k">Receita Pendente</div><div class="v" id="fatReceitaPendente">R$0</div></div>
+            <div class="stat"><div class="k">Qtd Pagos</div><div class="v" id="fatQtdPagos">0</div></div>
+            <div class="stat"><div class="k">Qtd Pendentes</div><div class="v" id="fatQtdPendentes">0</div></div>
+          </div>
+
+          <div style="height:12px"></div>
+
+          <div class="twoCharts">
+            <div class="card chartMini">
+              <div class="sectionLabel" style="margin-top:0;">Mix R$100 vs R$140</div>
+              <canvas id="fatMixChart"></canvas>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                <span class="pill">100: <b id="fatMix100">R$0</b></span>
+                <span class="pill">140: <b id="fatMix140">R$0</b></span>
+              </div>
+            </div>
+            <div class="card chartMini">
+              <div class="sectionLabel" style="margin-top:0;">Ocupação do mês</div>
+              <canvas id="fatOccChart"></canvas>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                <span class="pill ok">Confirmados: <b id="fatConfMes">0</b></span>
+                <span class="pill warn">Espera: <b id="fatEsperaMes">0</b></span>
+              </div>
+            </div>
+          </div>
+
+          <div style="height:12px"></div>
+
+          <div class="card chartBox">
+            <div class="sectionLabel" style="margin:0 0 10px 0;">Pago x Pendente por dia</div>
+            <canvas id="fatChart"></canvas>
+          </div>
+
+          <div style="height:12px"></div>
+
+          <div class="sectionLabel" style="margin-top:2px;">Detalhe por dia (toque para abrir a reserva)</div>
+          <div id="fatDays" class="dayLines"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-<div id="reserva">
-<div style="display:flex;justify-content:space-between;padding:10px;">
-<button onclick="prevMonth()">◀</button>
-<h2 id="monthLabel"></h2>
-<button onclick="nextMonth()">▶</button>
-</div>
-
-<div id="diasSemana" class="calendar"></div>
-<div id="calendar" class="calendar"></div>
-
-<div id="dayPanel" style="display:none;padding:15px;">
-<h3>Data: <span id="selectedDate"></span></h3>
-<input id="newName" placeholder="Nome">
-<br><br>
-Valor:
-<label><input type="radio" name="valor" value="100" checked>100</label>
-<label><input type="radio" name="valor" value="140">140</label>
-<br>
-Status:
-<label><input type="radio" name="status" value="Pago">Pago</label>
-<label><input type="radio" name="status" value="Pendente" checked>Pendente</label>
-<br><br>
-<button onclick="addParticipant()">Adicionar</button>
-<div id="list"></div>
-</div>
-</div>
-
-<div id="faturamento" style="display:none;padding:20px;">
-<h2>Faturamento Mensal</h2>
-<button onclick="exportMonth()">Exportar CSV do Mês</button>
-</div>
-
-<button onclick="logout()" style="margin:20px;">Sair</button>
-
-</div>
+<div id="toast" class="toast"></div>
 </body>
 </html>
