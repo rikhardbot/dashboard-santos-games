@@ -1,0 +1,181 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DashBoard Santos Games Corujões</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// 🔴 COLE AQUI SUA CONFIG DO FIREBASE
+const firebaseConfig = {
+  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
+  authDomain: "dashboard-santos-games.firebaseapp.com",
+  projectId: "dashboard-santos-games",
+  storageBucket: "dashboard-santos-games.firebasestorage.app",
+  messagingSenderId: "638652431482",
+  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+};
+
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let grafico;
+
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        document.getElementById("loginScreen").style.display = "none";
+        document.getElementById("dashboard").style.display = "block";
+        carregar();
+    }
+});
+
+window.login = function(){
+    const email = document.getElementById("email").value;
+    const senha = document.getElementById("senha").value;
+    signInWithEmailAndPassword(auth, email, senha)
+    .catch(err => alert("Erro ao logar"));
+}
+
+window.logout = function(){
+    signOut(auth);
+    location.reload();
+}
+
+window.adicionar = async function(){
+    const snapshot = await getDocs(collection(db, "participantes"));
+    if(snapshot.size >= 10){
+        alert("Vagas esgotadas!");
+        return;
+    }
+
+    await addDoc(collection(db, "participantes"), {
+        nome: document.getElementById("nome").value,
+        tipo: parseInt(document.getElementById("tipo").value),
+        status: document.getElementById("status").value
+    });
+}
+
+async function carregar(){
+    onSnapshot(collection(db, "participantes"), snapshot => {
+        let total = 0;
+        let pagos = 0;
+        let pendentes = 0;
+        let tabela = document.getElementById("tabela");
+        tabela.innerHTML = "";
+
+        snapshot.forEach(docSnap => {
+            const d = docSnap.data();
+            total += d.tipo;
+            if(d.status === "Pago") pagos++;
+            else pendentes++;
+
+            tabela.innerHTML += `
+            <tr>
+                <td>${d.nome}</td>
+                <td>R$${d.tipo}</td>
+                <td>${d.status}</td>
+                <td><button onclick="remover('${docSnap.id}')">Excluir</button></td>
+            </tr>`;
+        });
+
+        document.getElementById("ocupadas").innerText = snapshot.size;
+        document.getElementById("totalValor").innerText = total;
+        document.getElementById("pagos").innerText = pagos;
+        document.getElementById("pendentes").innerText = pendentes;
+
+        atualizarGrafico(pagos, pendentes);
+    });
+}
+
+window.remover = async function(id){
+    await deleteDoc(doc(db, "participantes", id));
+}
+
+function atualizarGrafico(pagos, pendentes){
+    const ctx = document.getElementById("grafico");
+    if(grafico) grafico.destroy();
+    grafico = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: ['Pagos', 'Pendentes'],
+            datasets: [{
+                data: [pagos, pendentes],
+                backgroundColor: ['#00ff00','#ff0000']
+            }]
+        }
+    });
+}
+</script>
+
+<style>
+body { margin:0; font-family:Arial; background:#0f0f0f; color:white; }
+header { background:#e10600; padding:15px; text-align:center; font-weight:bold; }
+.container { padding:20px; }
+.card-container { display:flex; gap:15px; flex-wrap:wrap; }
+.card { background:#1a1a1a; padding:20px; border-radius:10px; flex:1; min-width:150px; text-align:center; }
+button { background:#e10600; color:white; border:none; padding:10px; cursor:pointer; }
+button:hover { background:#b00500; }
+input, select { padding:10px; margin:5px 0; width:100%; }
+table { width:100%; margin-top:20px; border-collapse:collapse; }
+th, td { padding:10px; border-bottom:1px solid #333; text-align:center; }
+#dashboard { display:none; }
+.login { max-width:400px; margin:100px auto; background:#1a1a1a; padding:30px; border-radius:10px; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="login">
+<h2>SANTOS GAMES</h2>
+<p>DashBoard Corujões</p>
+<input type="email" id="email" placeholder="Email">
+<input type="password" id="senha" placeholder="Senha">
+<button onclick="login()">Entrar</button>
+</div>
+
+<div id="dashboard">
+<header>DashBoard Santos Games Corujões</header>
+<div class="container">
+
+<div class="card-container">
+<div class="card">👥 <span id="ocupadas">0</span>/10</div>
+<div class="card">💰 R$ <span id="totalValor">0</span></div>
+<div class="card">🟢 <span id="pagos">0</span></div>
+<div class="card">🔴 <span id="pendentes">0</span></div>
+</div>
+
+<h3>Adicionar Participante</h3>
+<input type="text" id="nome" placeholder="Nome">
+<select id="tipo">
+<option value="100">Corujão R$100</option>
+<option value="140">Corujão + Energético R$140</option>
+</select>
+<select id="status">
+<option value="Pago">Pago</option>
+<option value="Pendente">Pendente</option>
+</select>
+<button onclick="adicionar()">Adicionar</button>
+
+<canvas id="grafico" height="100"></canvas>
+
+<table>
+<thead>
+<tr><th>Nome</th><th>Tipo</th><th>Status</th><th>Ação</th></tr>
+</thead>
+<tbody id="tabela"></tbody>
+</table>
+
+<button onclick="logout()">Sair</button>
+
+</div>
+</div>
+
+</body>
+</html>
