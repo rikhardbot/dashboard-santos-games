@@ -18,12 +18,9 @@ import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc
 
 // 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -46,6 +43,7 @@ onAuthStateChanged(auth, (user) => {
     document.getElementById("app").style.display = "block";
     renderCalendar();
     showTab("reserva");
+    renderNotifs();
   }
 });
 
@@ -85,6 +83,55 @@ async function copyText(text){
     }catch(_){
       toast("Não foi possível copiar.");
     }
+
+const NOTIF_KEY = "sg_notifs_v1";
+function loadNotifs(){
+  try{ return JSON.parse(localStorage.getItem(NOTIF_KEY) || "[]"); }catch(e){ return []; }
+}
+function saveNotifs(list){
+  localStorage.setItem(NOTIF_KEY, JSON.stringify(list.slice(0, 30)));
+}
+function pushNotif(title, detail=""){
+  const list = loadNotifs();
+  list.unshift({ title, detail, at: Date.now() });
+  saveNotifs(list);
+  renderNotifs();
+}
+function formatDateTime(ts){
+  try{
+    return new Date(ts).toLocaleString("pt-BR");
+  }catch(e){ return ""; }
+}
+function renderNotifs(){
+  const list = loadNotifs();
+  const box = document.getElementById("notifList");
+  const badge = document.getElementById("notifBadge");
+  if(badge) badge.textContent = list.length ? String(list.length) : "";
+  if(!box) return;
+  if(list.length === 0){
+    box.innerHTML = `<div class="emptyState">Sem notificações.</div>`;
+    return;
+  }
+  box.innerHTML = list.map(n => `
+    <div class="notifItem">
+      <div class="notifTop">
+        <div class="notifTitle">${escapeHtml(n.title)}</div>
+        <div class="notifTime">${formatDateTime(n.at)}</div>
+      </div>
+      ${n.detail ? `<div class="notifDetail">${escapeHtml(n.detail)}</div>` : ``}
+    </div>
+  `).join("");
+}
+window.toggleNotifs = () => {
+  const panel = document.getElementById("notifPanel");
+  panel.classList.toggle("open");
+  renderNotifs();
+};
+window.clearNotifs = () => {
+  saveNotifs([]);
+  renderNotifs();
+  toast("Notificações limpas.");
+};
   }
 }
 function monthLabelText(){
@@ -154,8 +201,21 @@ onSnapshot(query(collection(db, "corujoes", dateStr, "participantes"), orderBy("
     const docs = [];
     snap.forEach(d => docs.push(d));
 
-    const confirmados = docs.slice(0, 10);
-    const espera = docs.slice(10);
+    
+    // Nova regra:
+    // Apenas status "Pago" pode ocupar as 10 vagas confirmadas.
+    const confirmados = [];
+    const espera = [];
+
+    docs.forEach(docSnap => {
+        const data = docSnap.data();
+        if(data.status === "Pago" && confirmados.length < 10){
+            confirmados.push(docSnap);
+        } else {
+            espera.push(docSnap);
+        }
+    });
+
 
     confCount.textContent = `${confirmados.length}/10`;
     esperaCount.textContent = `${espera.length}`;
@@ -205,6 +265,7 @@ function rowHtml(dateStr, id, d, isConfirmado){
       </div>
       <div class="rowActions">
         ${!isConfirmado ? `
+          <button class="btn" onclick="promoteToConfirmed(\'${dateStr}\',\'${id}\')">Subir p/ confirmados</button>
           <button class="btn ghost" onclick="copyText(buildContactText(d))">Copiar contato</button>
           ${buildWhatsAppLink(d) ? `<a class="btn ghost linkbtn" href="${buildWhatsAppLink(d)}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
           ${buildInstagramLink(d) ? `<a class="btn ghost linkbtn" href="${buildInstagramLink(d)}" target="_blank" rel="noopener">Instagram</a>` : ``}
@@ -221,6 +282,7 @@ window.closeDayPanel = () => {
   dayPanel.classList.remove("open");
 };
 
+
 window.addParticipant = async () => {
   if(!selectedDateStr) return toast("Selecione um dia no calendário.");
 
@@ -230,7 +292,21 @@ window.addParticipant = async () => {
   const valor = document.querySelector('input[name="valor"]:checked')?.value;
   const status = document.querySelector('input[name="status"]:checked')?.value;
 
-if(!nome) return toast("Digite o nome do participante.");
+  if(!nome) return toast("Digite o nome do participante.");
+
+  // Bloqueio: se já houver 10 confirmados (Pago), não permite adicionar mais ninguém
+  const q = query(collection(db, "corujoes", selectedDateStr, "participantes"), orderBy("createdAt","asc"));
+  const snap = await getDocs(q);
+  let confirmados = 0;
+  snap.forEach(docSnap => {
+    const d = docSnap.data();
+    if(d.status === "Pago" && confirmados < 10) confirmados++;
+  });
+  if(confirmados >= 10){
+    toast("Limite de 10 confirmados atingido. Não é possível adicionar mais pessoas.");
+    pushNotif("Tentativa bloqueada", `Dia ${selectedDateStr} já tem 10 confirmados.`);
+    return;
+  }
 
   await addDoc(collection(db, "corujoes", selectedDateStr, "participantes"), {
     nome,
@@ -240,29 +316,185 @@ if(!nome) return toast("Digite o nome do participante.");
     status,
     createdAt: Date.now()
   });
+
+  // Atualiza base de cadastro
+  await upsertCadastro({ nome, telefone, instagram });
+
   newName.value = "";
   if(newPhone) newPhone.value = "";
   if(newInsta) newInsta.value = "";
+
+  pushNotif("Nova reserva adicionada", `${nome} • ${selectedDateStr}`);
+};
+
+
+
+window.promoteToConfirmed = async (dateStr, id) => {
+  // Só promove se houver vaga disponível (menos de 10 pagos)
+  const q = query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc"));
+  const snap = await getDocs(q);
+  let confirmados = 0;
+  snap.forEach(docSnap => {
+    const d = docSnap.data();
+    if(d.status === "Pago" && confirmados < 10) confirmados++;
+  });
+  if(confirmados >= 10){
+    toast("Já existem 10 confirmados.");
+    pushNotif("Promoção não realizada", `Dia ${dateStr} já tem 10 confirmados.`);
+    return;
+  }
+  await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status: "Pago" });
+  toast("Promovido para confirmado (Pago).");
+  pushNotif("Promovido para confirmado", `Dia ${dateStr}`);
 };
 
 window.updateStatus = async (dateStr, id, status) => {
   await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status });
+  pushNotif("Status atualizado", `Dia ${dateStr} → ${status}`);
 };
 
 window.removeParticipant = async (dateStr, id) => {
   await deleteDoc(doc(db, "corujoes", dateStr, "participantes", id));
+  pushNotif("Reserva removida", `Dia ${dateStr}`);
 };
+
 
 window.showTab = (tab) => {
   reserva.style.display = tab === "reserva" ? "block" : "none";
   faturamento.style.display = tab === "faturamento" ? "block" : "none";
+  cadastro.style.display = tab === "cadastro" ? "block" : "none";
 
   document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
-  document.getElementById(tab === "reserva" ? "tabReserva" : "tabFaturamento").classList.add("active");
+  const map = { reserva: "tabReserva", faturamento: "tabFaturamento", cadastro: "tabCadastro" };
+  document.getElementById(map[tab]).classList.add("active");
 
-  if(tab === "faturamento"){
-    refreshFaturamento();
-  }
+  if(tab === "faturamento") refreshFaturamento();
+  if(tab === "cadastro") wireCadastro();
+};
+
+
+
+let cadastroWired = false;
+function wireCadastro(){
+  if(cadastroWired) return;
+  cadastroWired = true;
+
+  const q = query(collection(db, "cadastro"), orderBy("updatedAt","desc"));
+  onSnapshot(q, snap => {
+    const rows = [];
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      rows.push({
+        id: docSnap.id,
+        nome: d.nome || "",
+        telefone: d.telefone || "",
+        instagram: d.instagram || "",
+        lastDate: d.lastDate || "",
+        updatedAt: d.updatedAt || 0
+      });
+    });
+
+    const mapById = new Map(rows.map(r => [r.id, r]));
+    window.openCadModalFromRow = (id) => {
+      const obj = mapById.get(id);
+      if(!obj) return toast("Cadastro não encontrado.");
+      openCadModal(id, obj);
+    };
+
+    function render(filter=""){
+      const f = filter.trim().toLowerCase();
+      const filtered = !f ? rows : rows.filter(r =>
+        r.nome.toLowerCase().includes(f) ||
+        r.telefone.toLowerCase().includes(f) ||
+        r.instagram.toLowerCase().includes(f)
+      );
+
+      if(filtered.length === 0){
+        cadList.innerHTML = `<div class="emptyState">Nenhum cadastro encontrado.</div>`;
+        return;
+      }
+
+      
+cadList.innerHTML = filtered.map(r => `
+        <div class="cadRow">
+          <div class="cadLeft">
+            <div class="cadName">${escapeHtml(r.nome)} ${r.vip ? `<span class="vipBadge">VIP</span>` : ``}</div>
+            <div class="cadMeta">
+              ${r.telefone ? `<span class="pill subtle">📞 ${escapeHtml(r.telefone)}</span>` : ``}
+              ${r.instagram ? `<span class="pill subtle">📷 ${escapeHtml(r.instagram)}</span>` : ``}
+              ${r.lastDate ? `<span class="pill subtle">Última: ${escapeHtml(r.lastDate)}</span>` : ``}
+            </div>
+          </div>
+          <div class="cadActions">
+            ${r.telefone ? `<a class="btn ghost linkbtn" href="https://wa.me/${normalizePhone(r.telefone).startsWith('55')?normalizePhone(r.telefone):('55'+normalizePhone(r.telefone))}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
+            ${r.instagram ? `<a class="btn ghost linkbtn" href="https://instagram.com/${encodeURIComponent(String(r.instagram).trim().replace(/^@/,''))}" target="_blank" rel="noopener">Instagram</a>` : ``}
+            <button class="btn ghost" onclick="copyText(buildContactText(r))">Copiar</button>
+            <button class="btn ghost" onclick="toggleVip('${r.id}', ${!r.vip})">${r.vip ? "Remover VIP" : "Marcar VIP"}</button>
+            <button class="btn" onclick="openCadModalFromRow('${r.id}')">Editar</button>
+          </div>
+        </div>
+      `).join("");
+
+    }
+
+    render(cadSearch?.value || "");
+    if(cadSearch){
+      cadSearch.oninput = () => render(cadSearch.value || "");
+    }
+  });
+}
+
+
+let currentCadId = null;
+let currentCadObj = null;
+
+window.openCadModal = (id, obj) => {
+  currentCadId = id;
+  currentCadObj = obj || {};
+  cadModalSub.textContent = `ID: ${id}`;
+  cadEditNome.value = currentCadObj.nome || "";
+  cadEditTelefone.value = currentCadObj.telefone || "";
+  cadEditInstagram.value = currentCadObj.instagram || "";
+  cadEditVip.checked = !!currentCadObj.vip;
+  document.getElementById("cadModal").style.display = "block";
+};
+
+window.closeCadModal = () => {
+  document.getElementById("cadModal").style.display = "none";
+  currentCadId = null;
+  currentCadObj = null;
+};
+
+window.saveCad = async () => {
+  if(!currentCadId) return;
+  const nome = (cadEditNome.value || "").trim();
+  const telefone = (cadEditTelefone.value || "").trim();
+  const instagram = (cadEditInstagram.value || "").trim();
+  const vip = !!cadEditVip.checked;
+
+  await updateDoc(doc(db, "cadastro", currentCadId), {
+    nome, telefone, instagram, vip, updatedAt: Date.now()
+  });
+
+  pushNotif("Cadastro atualizado", nome || currentCadId);
+  toast("Cadastro atualizado.");
+  closeCadModal();
+};
+
+window.deleteCad = async () => {
+  if(!currentCadId) return;
+  const nome = currentCadObj?.nome || currentCadId;
+  if(!confirm(`Excluir cadastro de "${nome}"?`)) return;
+
+  await deleteDoc(doc(db, "cadastro", currentCadId));
+  pushNotif("Cadastro excluído", nome);
+  toast("Cadastro excluído.");
+  closeCadModal();
+};
+
+window.toggleVip = async (id, newVip) => {
+  await updateDoc(doc(db, "cadastro", id), { vip: !!newVip, updatedAt: Date.now() });
+  pushNotif("VIP atualizado", `${id} → ${newVip ? "VIP" : "Normal"}`);
 };
 
 async function refreshFaturamento(){
@@ -453,6 +685,26 @@ function buildInstagramLink(d){
   const handle = raw.replace(/^@/, "").replace(/\s+/g,"");
   if(!handle) return null;
   return `https://instagram.com/${encodeURIComponent(handle)}`;
+}
+
+
+async function upsertCadastro({ nome, telefone, instagram }){
+  const phoneDigits = normalizePhone(telefone);
+  const instaHandle = String(instagram || "").trim().replace(/^@/,"").replace(/\s+/g,"");
+  let id = "";
+  if(phoneDigits) id = "tel_" + phoneDigits;
+  else if(instaHandle) id = "ig_" + instaHandle.toLowerCase();
+  else id = "nome_" + String(nome||"").trim().toLowerCase().replace(/\s+/g,"_").slice(0,40);
+
+  if(!id || id === "nome_") return;
+
+  await setDoc(doc(db, "cadastro", id), {
+    nome: nome || "",
+    telefone: telefone || "",
+    instagram: instagram || "",
+    updatedAt: Date.now(),
+    lastDate: selectedDateStr || ""
+  }, { merge: true });
 }
 
 function buildContactText(d){
@@ -741,6 +993,129 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
 @media (max-width: 520px){ .twoInputs{ grid-template-columns: 1fr; } }
 .contact{ display:flex; gap: 6px; flex-wrap:wrap; margin: 2px 0 6px; }
 
+
+.iconBtn{
+  position: relative;
+  border:none; cursor:pointer;
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.iconBtn:hover{ background: rgba(255,255,255,.10); }
+.notifBadge{
+  position:absolute;
+  top: -6px; right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(225,6,0,.92);
+  color: white;
+  font-size: 11px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.notifPanel{
+  position: absolute;
+  right: 16px;
+  top: 64px;
+  width: min(420px, calc(100vw - 24px));
+  max-height: 70vh;
+  overflow:auto;
+  background: rgba(15,15,20,.98);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  display:none;
+  padding: 12px;
+}
+.notifPanel.open{ display:block; }
+.notifHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.notifH{ font-weight: 800; }
+.notifS{ font-size: 12px; color: var(--muted2); margin-top: 2px; }
+.notifList{ display:flex; flex-direction:column; gap: 10px; }
+.notifItem{
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.notifTop{ display:flex; justify-content:space-between; gap: 10px; }
+.notifTitle{ font-weight: 700; }
+.notifTime{ font-size: 12px; color: var(--muted2); white-space: nowrap; }
+.notifDetail{ margin-top: 6px; font-size: 13px; color: var(--muted); }
+
+.cadList{ display:flex; flex-direction:column; gap: 10px; }
+.cadRow{
+  display:flex; align-items:flex-start; justify-content:space-between; gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.cadLeft{ min-width: 0; }
+.cadName{ font-weight: 800; }
+.cadMeta{ display:flex; gap: 6px; flex-wrap:wrap; margin-top: 6px; }
+.cadActions{ display:flex; gap: 8px; flex-wrap:wrap; justify-content:flex-end; }
+
+
+.modalOverlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 16px;
+  z-index: 50;
+}
+.modalCard{
+  width: min(560px, 100%);
+  background: rgba(15,15,20,.98);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+.modalHeader{
+  padding: 14px;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.modalTitle{ font-weight: 900; font-size: 16px; }
+.modalSub{ font-size: 12px; color: var(--muted2); margin-top: 4px; }
+.modalBody{ padding: 14px; }
+.modalActions{
+  margin-top: 14px;
+  display:flex;
+  gap: 10px;
+  align-items:center;
+}
+.vipBadge{
+  display:inline-flex;
+  align-items:center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  background: rgba(225,6,0,.20);
+  border: 1px solid rgba(225,6,0,.35);
+  color: #ffd0d0;
+}
+
 </style>
 </head>
 
@@ -767,6 +1142,7 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
         <div class="tabs">
           <button id="tabReserva" class="tab active" onclick="showTab('reserva')">Reserva</button>
           <button id="tabFaturamento" class="tab" onclick="showTab('faturamento')">Faturamento</button>
+          <button id="tabCadastro" class="tab" onclick="showTab(\'cadastro\')">Cadastro</button>
         </div>
         <button class="btn ghost" onclick="logout()">Sair</button>
       </div>
@@ -901,6 +1277,56 @@ a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
       </div>
     </div>
 
+    <div id="cadastro" style="display:none;">
+      <div class="card">
+        <div class="cardHeader">
+          <h2>Cadastro (Base de contatos)</h2>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <input id="cadSearch" class="input" placeholder="Buscar por nome, telefone ou instagram" style="width:320px; max-width: 55vw;" />
+          </div>
+        </div>
+        <div class="sideInner">
+          <div class="sectionLabel" style="margin-top:0;">Pessoas adicionadas</div>
+          <div id="cadList" class="cadList"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- Cadastro Modal -->
+<div id="cadModal" class="modalOverlay" style="display:none;">
+  <div class="modalCard">
+    <div class="modalHeader">
+      <div>
+        <div class="modalTitle">Editar cadastro</div>
+        <div class="modalSub" id="cadModalSub">Atualize os dados do contato</div>
+      </div>
+      <button class="btn ghost" onclick="closeCadModal()">Fechar</button>
+    </div>
+
+    <div class="modalBody">
+      <div class="twoInputs">
+        <input id="cadEditNome" class="input" placeholder="Nome" />
+        <input id="cadEditTelefone" class="input" inputmode="tel" placeholder="Telefone" />
+      </div>
+      <div style="height:10px"></div>
+      <input id="cadEditInstagram" class="input" placeholder="Instagram" />
+      <div style="height:10px"></div>
+
+      <label class="choice" style="width:fit-content;">
+        <input id="cadEditVip" type="checkbox" /> VIP / Cliente frequente
+      </label>
+
+      <div class="modalActions">
+        <button class="btn danger" onclick="deleteCad()">Excluir</button>
+        <div style="flex:1"></div>
+        <button class="btn ghost" onclick="closeCadModal()">Cancelar</button>
+        <button class="btn" onclick="saveCad()">Salvar</button>
+      </div>
+    </div>
   </div>
 </div>
 
