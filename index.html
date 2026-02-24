@@ -50,7 +50,7 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 
-window.doLogin = () => {
+window.doLogin = async function doLogin() {
   signInWithEmailAndPassword(auth, email.value, senha.value)
     .catch(() => toast("Usuário ou senha inválidos."));
 };
