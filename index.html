@@ -1,47 +1,41 @@
-
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DashBoard Santos Games Corujões</title>
+<title>DashBoard Santos Games Corujões 2.0</title>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
-
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-let grafico;
+let currentDate = new Date();
 
 onAuthStateChanged(auth, (user) => {
     if (user) {
         document.getElementById("loginScreen").style.display = "none";
         document.getElementById("dashboard").style.display = "block";
-        carregar();
+        renderCalendar();
     }
 });
 
 window.login = function(){
-    const email = document.getElementById("email").value;
-    const senha = document.getElementById("senha").value;
-    signInWithEmailAndPassword(auth, email, senha)
-    .catch(err => alert("Erro ao logar"));
+    signInWithEmailAndPassword(auth,
+        document.getElementById("email").value,
+        document.getElementById("senha").value
+    ).catch(() => alert("Erro ao logar"));
 }
 
 window.logout = function(){
@@ -49,132 +43,154 @@ window.logout = function(){
     location.reload();
 }
 
-window.adicionar = async function(){
-    const snapshot = await getDocs(collection(db, "participantes"));
-    if(snapshot.size >= 10){
-        alert("Vagas esgotadas!");
-        return;
+function renderCalendar(){
+    const calendar = document.getElementById("calendar");
+    calendar.innerHTML = "";
+
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+
+    document.getElementById("monthLabel").innerText =
+        currentDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    for(let i=0;i<firstDay;i++){
+        calendar.innerHTML += "<div></div>";
     }
 
-    await addDoc(collection(db, "participantes"), {
-        nome: document.getElementById("nome").value,
-        tipo: parseInt(document.getElementById("tipo").value),
-        status: document.getElementById("status").value
-    });
+    for(let day=1; day<=daysInMonth; day++){
+        const dateStr = year + "-" + String(month+1).padStart(2,'0') + "-" + String(day).padStart(2,'0');
+
+        calendar.innerHTML += `
+            <div class="day" onclick="openDay('${dateStr}')">
+                ${day}
+                <div id="count-${dateStr}" class="badge"></div>
+            </div>`;
+
+        loadCount(dateStr);
+    }
 }
 
-async function carregar(){
-    onSnapshot(collection(db, "participantes"), snapshot => {
-        let total = 0;
-        let pagos = 0;
-        let pendentes = 0;
-        let tabela = document.getElementById("tabela");
-        tabela.innerHTML = "";
-
-        snapshot.forEach(docSnap => {
-            const d = docSnap.data();
-            total += d.tipo;
-            if(d.status === "Pago") pagos++;
-            else pendentes++;
-
-            tabela.innerHTML += `
-            <tr>
-                <td>${d.nome}</td>
-                <td>R$${d.tipo}</td>
-                <td>${d.status}</td>
-                <td><button onclick="remover('${docSnap.id}')">Excluir</button></td>
-            </tr>`;
-        });
-
-        document.getElementById("ocupadas").innerText = snapshot.size;
-        document.getElementById("totalValor").innerText = total;
-        document.getElementById("pagos").innerText = pagos;
-        document.getElementById("pendentes").innerText = pendentes;
-
-        atualizarGrafico(pagos, pendentes);
-    });
+window.prevMonth = function(){
+    currentDate.setMonth(currentDate.getMonth()-1);
+    renderCalendar();
 }
 
-window.remover = async function(id){
-    await deleteDoc(doc(db, "participantes", id));
+window.nextMonth = function(){
+    currentDate.setMonth(currentDate.getMonth()+1);
+    renderCalendar();
 }
 
-function atualizarGrafico(pagos, pendentes){
-    const ctx = document.getElementById("grafico");
-    if(grafico) grafico.destroy();
-    grafico = new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: ['Pagos', 'Pendentes'],
-            datasets: [{
-                data: [pagos, pendentes],
-                backgroundColor: ['#00ff00','#ff0000']
-            }]
+function loadCount(dateStr){
+    onSnapshot(collection(db, "corujoes", dateStr, "participantes"), snap => {
+        const count = snap.size;
+        const badge = document.getElementById("count-"+dateStr);
+        if(badge){
+            badge.innerText = count + "/10";
+            if(count >= 10) badge.style.background = "#e10600";
         }
     });
+}
+
+window.openDay = function(dateStr){
+    document.getElementById("selectedDate").innerText = dateStr;
+    document.getElementById("dayPanel").style.display = "block";
+
+    onSnapshot(collection(db, "corujoes", dateStr, "participantes"), snap => {
+        const list = document.getElementById("participantList");
+        list.innerHTML = "";
+        let index = 0;
+
+        snap.forEach(docSnap => {
+            const d = docSnap.data();
+            const statusBtn = d.status === "Pago"
+                ? `<button onclick="updateStatus('${dateStr}','${docSnap.id}','Pendente')">🔴</button>`
+                : `<button onclick="updateStatus('${dateStr}','${docSnap.id}','Pago')">🟢</button>`;
+
+            list.innerHTML += `
+                <div class="participant ${index<10?'confirmado':'espera'}">
+                    ${d.nome} - ${d.status}
+                    ${statusBtn}
+                    <button onclick="removeParticipant('${dateStr}','${docSnap.id}')">❌</button>
+                </div>`;
+            index++;
+        });
+    });
+}
+
+window.addParticipant = async function(){
+    const dateStr = document.getElementById("selectedDate").innerText;
+    const nome = document.getElementById("newName").value;
+    if(!nome) return alert("Digite um nome");
+
+    await addDoc(collection(db, "corujoes", dateStr, "participantes"), {
+        nome: nome,
+        status: "Pendente"
+    });
+
+    document.getElementById("newName").value = "";
+}
+
+window.updateStatus = async function(dateStr, id, status){
+    await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status });
+}
+
+window.removeParticipant = async function(dateStr, id){
+    await deleteDoc(doc(db, "corujoes", dateStr, "participantes", id));
 }
 </script>
 
 <style>
 body { margin:0; font-family:Arial; background:#0f0f0f; color:white; }
 header { background:#e10600; padding:15px; text-align:center; font-weight:bold; }
-.container { padding:20px; }
-.card-container { display:flex; gap:15px; flex-wrap:wrap; }
-.card { background:#1a1a1a; padding:20px; border-radius:10px; flex:1; min-width:150px; text-align:center; }
-button { background:#e10600; color:white; border:none; padding:10px; cursor:pointer; }
-button:hover { background:#b00500; }
-input, select { padding:10px; margin:5px 0; width:100%; }
-table { width:100%; margin-top:20px; border-collapse:collapse; }
-th, td { padding:10px; border-bottom:1px solid #333; text-align:center; }
-#dashboard { display:none; }
 .login { max-width:400px; margin:100px auto; background:#1a1a1a; padding:30px; border-radius:10px; }
+#dashboard { display:none; padding:20px; }
+.calendar { display:grid; grid-template-columns: repeat(7, 1fr); gap:10px; }
+.day { background:#1a1a1a; padding:20px; border-radius:8px; cursor:pointer; position:relative; }
+.day:hover { background:#2a2a2a; }
+.badge { position:absolute; bottom:5px; right:5px; background:#333; padding:2px 6px; border-radius:12px; font-size:12px; }
+#dayPanel { display:none; background:#1a1a1a; padding:20px; margin-top:20px; border-radius:10px; }
+.participant { padding:8px; margin:5px 0; background:#222; border-radius:5px; }
+.confirmado { border-left:4px solid #00aa00; }
+.espera { border-left:4px solid #e10600; }
+button { background:#e10600; color:white; border:none; padding:6px 10px; margin-left:5px; cursor:pointer; }
+button:hover { background:#b00500; }
+.nav { display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; }
+input { padding:8px; width:70%; }
 </style>
 </head>
 <body>
 
 <div id="loginScreen" class="login">
 <h2>SANTOS GAMES</h2>
-<p>DashBoard Corujões</p>
-<input type="email" id="email" placeholder="Email">
-<input type="password" id="senha" placeholder="Senha">
+<p>DashBoard Corujões 2.0</p>
+<input type="email" id="email" placeholder="Email"><br><br>
+<input type="password" id="senha" placeholder="Senha"><br><br>
 <button onclick="login()">Entrar</button>
 </div>
 
 <div id="dashboard">
 <header>DashBoard Santos Games Corujões</header>
-<div class="container">
 
-<div class="card-container">
-<div class="card">👥 <span id="ocupadas">0</span>/10</div>
-<div class="card">💰 R$ <span id="totalValor">0</span></div>
-<div class="card">🟢 <span id="pagos">0</span></div>
-<div class="card">🔴 <span id="pendentes">0</span></div>
+<div class="nav">
+<button onclick="prevMonth()">◀</button>
+<h2 id="monthLabel"></h2>
+<button onclick="nextMonth()">▶</button>
 </div>
 
-<h3>Adicionar Participante</h3>
-<input type="text" id="nome" placeholder="Nome">
-<select id="tipo">
-<option value="100">Corujão R$100</option>
-<option value="140">Corujão + Energético R$140</option>
-</select>
-<select id="status">
-<option value="Pago">Pago</option>
-<option value="Pendente">Pendente</option>
-</select>
-<button onclick="adicionar()">Adicionar</button>
+<div class="calendar" id="calendar"></div>
 
-<canvas id="grafico" height="100"></canvas>
-
-<table>
-<thead>
-<tr><th>Nome</th><th>Tipo</th><th>Status</th><th>Ação</th></tr>
-</thead>
-<tbody id="tabela"></tbody>
-</table>
+<div id="dayPanel">
+<h3>Data: <span id="selectedDate"></span></h3>
+<input type="text" id="newName" placeholder="Nome do participante">
+<button onclick="addParticipant()">Adicionar</button>
+<div id="participantList"></div>
+</div>
 
 <button onclick="logout()">Sair</button>
 
-</div>
 </div>
 
 </body>
