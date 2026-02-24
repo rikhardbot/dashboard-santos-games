@@ -18,12 +18,9 @@ import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc
 
 // 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -50,13 +47,45 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 
-window.doLogin = async function doLogin() {
+
+window.doLogin = async function doLogin(){
+  const emailEl = document.getElementById("email");
+  const senhaEl = document.getElementById("senha");
+  const emailVal = (emailEl?.value || "").trim();
+  const senhaVal = (senhaEl?.value || "").trim();
+
+  if(!emailVal || !senhaVal){
+    toast("Preencha email e senha.");
+    return;
+  }
+
+  try{
+    await signInWithEmailAndPassword(auth, emailVal, senhaVal);
+    pushNotif("Login realizado", emailVal);
+  }catch(err){
+    const code = err?.code || "erro-desconhecido";
+    const msg =
+      code === "auth/unauthorized-domain" ? "Domínio não autorizado no Firebase (Vercel)." :
+      code === "auth/invalid-api-key" ? "API Key inválida (firebaseConfig)." :
+      code === "auth/user-not-found" ? "Usuário não encontrado." :
+      code === "auth/wrong-password" ? "Senha incorreta." :
+      code === "auth/operation-not-allowed" ? "Login email/senha desativado no Firebase." :
+      code === "auth/invalid-email" ? "Email inválido." :
+      "Falha no login: " + code;
+
+    toast(msg);
+    pushNotif("Falha no login", msg);
+    console.error("Login error:", err);
+  }
+};
+
+window.doLogin = () => {
   signInWithEmailAndPassword(auth, email.value, senha.value)
     .catch(() => toast("Usuário ou senha inválidos."));
 };
 
-window.logout = () => {
-  signOut(auth);
+window.logout = async () => {
+  try{ await signOut(auth); }catch(e){}
   location.reload();
 };
 
