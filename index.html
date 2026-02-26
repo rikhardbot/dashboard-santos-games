@@ -1,468 +1,1238 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>DashBoard Santos Games Corujões 2026</title>
-
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-// 🔴 COLE AQUI SUA CONFIG DO FIREBASE
-const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-const year = 2026;
-let currentMonth = 0; // 0 = Janeiro
-let selectedDateStr = null;
-
-const meses = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-
-let faturamentoChart = null;
-let mixChart = null;
-let ocupacaoChart = null;
-
-onAuthStateChanged(auth, (user) => {
-  if (user) {
-    document.getElementById("loginScreen").style.display = "none";
-    document.getElementById("app").style.display = "block";
-    renderCalendar();
-    showTab("reserva");
-    renderNotifs();
-  }
-});
-
-
-window.doLogin = async function doLogin(){
-  const emailEl = document.getElementById("email");
-  const senhaEl = document.getElementById("senha");
-  const emailVal = (emailEl?.value || "").trim();
-  const senhaVal = (senhaEl?.value || "").trim();
-
-  if(!emailVal || !senhaVal){
-    toast("Preencha email e senha.");
-    return;
-  }
-
-  try{
-    await signInWithEmailAndPassword(auth, emailVal, senhaVal);
-    pushNotif("Login realizado", emailVal);
-  }catch(err){
-    const code = err?.code || "erro-desconhecido";
-    const msg =
-      code === "auth/unauthorized-domain" ? "Domínio não autorizado no Firebase (Vercel)." :
-      code === "auth/invalid-api-key" ? "API Key inválida (firebaseConfig)." :
-      code === "auth/user-not-found" ? "Usuário não encontrado." :
-      code === "auth/wrong-password" ? "Senha incorreta." :
-      code === "auth/operation-not-allowed" ? "Login email/senha desativado no Firebase." :
-      code === "auth/invalid-email" ? "Email inválido." :
-      "Falha no login: " + code;
-
-    toast(msg);
-    pushNotif("Falha no login", msg);
-    console.error("Login error:", err);
-  }
-};
-
-window.logout = async () => {
-  try{ await signOut(auth); }catch(e){}
-  location.reload();
-};
-
-function toast(msg){
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.classList.add("show");
-  setTimeout(()=>t.classList.remove("show"), 2400);
-}
-
-
-async function copyText(text){
-  try{
-    if(!text) return toast("Sem contato para copiar.");
-    await navigator.clipboard.writeText(text);
-    toast("Contato copiado!");
-  }catch(e){
-    // Fallback: cria textarea
-    try{
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-      toast("Contato copiado!");
-    }catch(_){
-      toast("Não foi possível copiar.");
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DashBoard Santos Games Corujões</title>
+  <style>
+    :root{
+      --bg:#0b0b0f;
+      --card:#12121a;
+      --card2:#151523;
+      --text:#ffffff;
+      --muted:#b7b7c7;
+      --muted2:#8a8aa0;
+      --border:rgba(255,255,255,.10);
+      --red:#e10600;
+      --shadow: 0 18px 60px rgba(0,0,0,.55);
+      --radius: 18px;
     }
 
-const NOTIF_KEY = "sg_notifs_v1";
-function loadNotifs(){
-  try{ return JSON.parse(localStorage.getItem(NOTIF_KEY) || "[]"); }catch(e){ return []; }
-}
-function saveNotifs(list){
-  localStorage.setItem(NOTIF_KEY, JSON.stringify(list.slice(0, 30)));
-}
-function pushNotif(title, detail=""){
-  const list = loadNotifs();
-  list.unshift({ title, detail, at: Date.now() });
-  saveNotifs(list);
-  renderNotifs();
-}
-function formatDateTime(ts){
-  try{
-    return new Date(ts).toLocaleString("pt-BR");
-  }catch(e){ return ""; }
-}
-function renderNotifs(){
-  const list = loadNotifs();
-  const box = document.getElementById("notifList");
-  const badge = document.getElementById("notifBadge");
-  if(badge) badge.textContent = list.length ? String(list.length) : "";
-  if(!box) return;
-  if(list.length === 0){
-    box.innerHTML = `<div class="emptyState">Sem notificações.</div>`;
-    return;
-  }
-  box.innerHTML = list.map(n => `
-    <div class="notifItem">
-      <div class="notifTop">
-        <div class="notifTitle">${escapeHtml(n.title)}</div>
-        <div class="notifTime">${formatDateTime(n.at)}</div>
-      </div>
-      ${n.detail ? `<div class="notifDetail">${escapeHtml(n.detail)}</div>` : ``}
-    </div>
-  `).join("");
-}
-window.toggleNotifs = () => {
-  const panel = document.getElementById("notifPanel");
-  panel.classList.toggle("open");
-  renderNotifs();
-};
-window.clearNotifs = () => {
-  saveNotifs([]);
-  renderNotifs();
-  toast("Notificações limpas.");
-};
-  }
-}
-function monthLabelText(){
-  return `${meses[currentMonth]} 2026`;
-}
-
-window.prevMonth = () => {
-  if (currentMonth > 0) {
-    currentMonth--;
-    renderCalendar();
-    if (document.getElementById("faturamento").style.display !== "none") refreshFaturamento();
-  }
-};
-
-window.nextMonth = () => {
-  if (currentMonth < 11) {
-    currentMonth++;
-    renderCalendar();
-    if (document.getElementById("faturamento").style.display !== "none") refreshFaturamento();
-  }
-};
-
-function renderCalendar(){
-  monthLabel.textContent = monthLabelText();
-
-  diasSemana.innerHTML = "";
-  ["D","S","T","Q","Q","S","S"].forEach(d => {
-    diasSemana.innerHTML += `<div class="dow">${d}</div>`;
-  });
-
-  calendar.innerHTML = "";
-
-  const firstDay = new Date(year, currentMonth, 1).getDay(); // 0=Dom
-  const totalDays = new Date(year, currentMonth + 1, 0).getDate();
-
-  for (let i = 0; i < firstDay; i++) calendar.innerHTML += `<div class="empty"></div>`;
-
-  for (let d = 1; d <= totalDays; d++) {
-    const dateStr = `${year}-${String(currentMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-    calendar.innerHTML += `
-      <button class="day" type="button" onclick="openDay('${dateStr}')">
-        <span class="dayNum">${d}</span>
-        <span id="badge-${dateStr}" class="badge"></span>
-      </button>`;
-    wireDayBadge(dateStr);
-  }
-}
-
-function wireDayBadge(dateStr){
-  onSnapshot(query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc")), snap => {
-    const badge = document.getElementById("badge-" + dateStr);
-    if(!badge) return;
-    const count = snap.size;
-    badge.textContent = `${count}/10`;
-    badge.classList.toggle("full", count >= 10);
-    badge.classList.toggle("has", count > 0);
-  });
-}
-
-window.openDay = (dateStr) => {
-  selectedDateStr = dateStr;
-  selectedDate.textContent = dateStr;
-  dayPanel.classList.add("open");
-
-  
-onSnapshot(query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc")), snap => {
-    const docs = [];
-    snap.forEach(d => docs.push(d));
-
-    
-    // Nova regra:
-    // Apenas status "Pago" pode ocupar as 10 vagas confirmadas.
-    const confirmados = [];
-    const espera = [];
-
-    docs.forEach(docSnap => {
-        const data = docSnap.data();
-        if(data.status === "Pago" && confirmados.length < 10){
-            confirmados.push(docSnap);
-        } else {
-            espera.push(docSnap);
-        }
-    });
-
-
-    confCount.textContent = `${confirmados.length}/10`;
-    esperaCount.textContent = `${espera.length}`;
-
-    // Confirmados
-    confList.innerHTML = "";
-    if(confirmados.length === 0){
-        confList.innerHTML = `<div class="emptyState">Nenhuma reserva confirmada ainda.</div>`;
-    } else {
-        confirmados.forEach(docSnap => {
-            const d = docSnap.data();
-            confList.innerHTML += rowHtml(dateStr, docSnap.id, d, true);
-        });
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background: radial-gradient(1200px 700px at 20% -10%, rgba(225,6,0,.25), transparent 60%),
+                  radial-gradient(900px 600px at 110% 10%, rgba(255,255,255,.08), transparent 60%),
+                  var(--bg);
+      color: var(--text);
     }
 
-    // Espera
-    esperaList.innerHTML = "";
-    if(espera.length === 0){
-        esperaList.innerHTML = `<div class="emptyState">Sem pessoas na lista de espera.</div>`;
-    } else {
-        espera.forEach(docSnap => {
-            const d = docSnap.data();
-            esperaList.innerHTML += rowHtml(dateStr, docSnap.id, d, false);
-        });
+    a{ color:inherit; }
+
+    .wrap{ max-width: 1200px; margin: 0 auto; padding: 18px; }
+    .topbar{
+      position: sticky; top:0;
+      z-index: 5;
+      backdrop-filter: blur(10px);
+      background: rgba(11,11,15,.75);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .topbarInner{
+      display:flex; align-items:center; justify-content:space-between;
+      gap: 12px;
+      padding: 14px 18px;
+      max-width: 1200px; margin: 0 auto;
+    }
+    .brand{
+      display:flex; align-items:center; gap: 12px;
+      min-width: 0;
+    }
+    .logo{
+      width: 40px; height: 40px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(225,6,0,.95), rgba(225,6,0,.25));
+      border: 1px solid rgba(225,6,0,.40);
+      box-shadow: 0 18px 40px rgba(225,6,0,.18);
+      display:flex; align-items:center; justify-content:center;
+      font-weight: 900;
+      letter-spacing:.04em;
+    }
+    .titleBox{ min-width: 0; }
+    .title{
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: .02em;
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      margin: 0;
+      line-height: 1.1;
+    }
+    .subtitle{
+      margin: 3px 0 0;
+      font-size: 12px;
+      color: var(--muted2);
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
     }
 
-    dayStats.textContent = `Confirmados: ${confirmados.length}/10 • Espera: ${espera.length}`;
-});
+    .tabs{
+      display:flex; gap: 8px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      padding: 6px;
+      border-radius: 999px;
+    }
+    .tab{
+      border:none;
+      cursor:pointer;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 12px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      transition: .15s ease;
+    }
+    .tab.active{
+      background: rgba(225,6,0,.18);
+      border: 1px solid rgba(225,6,0,.35);
+      color: white;
+    }
 
-};
+    .actions{
+      display:flex; align-items:center; gap: 10px;
+    }
 
+    .btn{
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-weight: 800;
+      cursor:pointer;
+      transition: .15s ease;
+      font-size: 13px;
+    }
+    .btn:hover{ background: rgba(255,255,255,.10); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.primary{
+      background: rgba(225,6,0,.90);
+      border-color: rgba(225,6,0,.70);
+    }
+    .btn.primary:hover{ background: rgba(225,6,0,1); }
+    .btn.ghost{
+      background: rgba(255,255,255,.03);
+    }
+    .btn.danger{
+      background: rgba(225,6,0,.16);
+      border-color: rgba(225,6,0,.35);
+    }
+    .btn:focus-visible{ outline: 2px solid rgba(225,6,0,.65); outline-offset: 2px; }
 
-function rowHtml(dateStr, id, d, isConfirmado){
-  return `
-    <div class="row ${isConfirmado ? "confirmado" : "espera"}">
-      <div class="rowLeft">
-        <div class="name">${escapeHtml(d.nome)}</div>
-        <div class="contact">
-          ${d.telefone ? `<span class="pill subtle">📞 ${escapeHtml(d.telefone)}</span>` : ``}
-          ${d.instagram ? `<span class="pill subtle">📷 ${escapeHtml(d.instagram)}</span>` : ``}
+    .iconBtn{
+      position: relative;
+      border:none; cursor:pointer;
+      width: 40px; height: 40px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.10);
+      color: var(--text);
+    }
+    .iconBtn:hover{ background: rgba(255,255,255,.10); }
+    .notifBadge{
+      position:absolute;
+      top: -6px; right: -6px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: rgba(225,6,0,.92);
+      color: white;
+      font-size: 11px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+    @media (max-width: 980px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+
+    .card{
+      background: rgba(18,18,26,.78);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .cardHeader{
+      padding: 14px 14px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+    }
+    .cardHeader h2{
+      margin:0;
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: .02em;
+    }
+    .cardHeader p{
+      margin: 4px 0 0;
+      color: var(--muted2);
+      font-size: 12px;
+    }
+
+    .inner{ padding: 14px; }
+
+    .rowLine{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 5px 10px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 12px;
+    }
+    .pill.subtle{ color: var(--muted2); }
+    .pill.ok{ background: rgba(0,255,140,.08); border-color: rgba(0,255,140,.20); color: #c9ffea;}
+    .pill.warn{ background: rgba(255,200,0,.08); border-color: rgba(255,200,0,.22); color: #ffe8a7;}
+
+    .sectionLabel{
+      font-size: 12px;
+      letter-spacing:.10em;
+      text-transform: uppercase;
+      color: var(--muted2);
+      font-weight: 900;
+      margin: 10px 0 8px;
+    }
+
+    /* Calendar */
+    .monthBar{
+      display:flex; align-items:center; justify-content:space-between;
+      gap: 10px;
+    }
+    .monthTitle{
+      font-weight: 900;
+      font-size: 14px;
+      letter-spacing:.02em;
+    }
+    .monthNav{
+      display:flex; gap: 8px; align-items:center;
+    }
+    .navBtn{
+      width: 40px; height: 40px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.06);
+      color: white;
+      cursor:pointer;
+      font-weight: 900;
+    }
+    .navBtn:disabled{ opacity:.35; cursor:not-allowed; }
+
+    .dow{
+      display:grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+      color: var(--muted2);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .dow div{ text-align:center; }
+
+    .calendar{
+      display:grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .dayBtn{
+      min-height: 56px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+      color: white;
+      padding: 8px;
+      cursor:pointer;
+      position: relative;
+      transition: .15s ease;
+    }
+    .dayBtn:hover{ background: rgba(255,255,255,.08); }
+    .dayBtn:focus-visible{ outline:2px solid rgba(225,6,0,.65); outline-offset:2px; }
+    .dayNum{
+      font-weight: 900;
+      font-size: 14px;
+    }
+    .dayMeta{
+      margin-top: 6px;
+      display:flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .badge{
+      font-size: 11px;
+      font-weight: 900;
+      padding: 3px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+    }
+    .badge.red{ border-color: rgba(225,6,0,.35); background: rgba(225,6,0,.14); color: #ffd0d0; }
+    .badge.ok{ border-color: rgba(0,255,140,.25); background: rgba(0,255,140,.08); color:#c9ffea; }
+    .badge.warn{ border-color: rgba(255,200,0,.25); background: rgba(255,200,0,.08); color:#ffe8a7; }
+
+    .disabledDay{ opacity:.35; pointer-events:none; }
+
+    /* Day panel */
+    .dayPanel{
+      display:none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.62);
+      padding: 16px;
+      z-index: 20;
+      align-items:center;
+      justify-content:center;
+    }
+    .dayPanel.open{ display:flex; }
+    .dayCard{
+      width: min(860px, 100%);
+      max-height: 85vh;
+      overflow:auto;
+      background: rgba(15,15,20,.98);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+    }
+    .dayTop{
+      padding: 14px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      display:flex; align-items:flex-start; justify-content:space-between; gap: 10px;
+    }
+    .dayTop h3{ margin:0; font-size: 16px; font-weight: 900; }
+    .dayTop .small{ margin-top: 4px; color: var(--muted2); font-size: 12px; }
+    .dayBody{ padding: 14px; }
+    .form{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 12px;
+      align-items:start;
+    }
+    @media (max-width: 820px){
+      .form{ grid-template-columns: 1fr; }
+    }
+    .input{
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+      color: white;
+      padding: 11px 12px;
+      font-weight: 700;
+      font-size: 14px;
+      outline: none;
+    }
+    .input:focus{ border-color: rgba(225,6,0,.45); box-shadow: 0 0 0 4px rgba(225,6,0,.10); }
+    .twoInputs{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 520px){ .twoInputs{ grid-template-columns: 1fr; } }
+
+    .choices{ display:flex; gap: 10px; flex-wrap:wrap; }
+    .choice{
+      display:inline-flex; align-items:center; gap: 8px;
+      padding: 8px 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+      font-weight: 800;
+      font-size: 13px;
+      color: var(--muted);
+      cursor:pointer;
+      user-select:none;
+    }
+    .choice input{ accent-color: var(--red); }
+
+    .stack{ display:grid; gap: 12px; margin-top: 12px; }
+    .stackHeader{
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+    }
+    .stackHeader h4{
+      margin:0;
+      font-size: 12px;
+      letter-spacing:.10em;
+      text-transform: uppercase;
+      color: var(--muted2);
+      font-weight: 900;
+    }
+    .list{ display:grid; gap: 10px; }
+    .emptyState{
+      padding: 12px 12px;
+      border-radius: 14px;
+      border: 1px dashed rgba(255,255,255,.14);
+      color: var(--muted2);
+      background: rgba(255,255,255,.03);
+      font-size: 13px;
+    }
+
+    .row{
+      display:flex; align-items:flex-start; justify-content:space-between; gap: 10px;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+    }
+    .rowLeft{ min-width: 0; }
+    .name{ font-weight: 900; }
+    .contact{ display:flex; gap: 6px; flex-wrap:wrap; margin: 6px 0 8px; }
+    .meta{ display:flex; gap: 6px; flex-wrap:wrap; }
+    .tag{ font-size: 11px; font-weight: 900; padding: 3px 7px; border-radius:999px; border:1px solid rgba(255,255,255,.12); color: var(--muted); }
+    .tag.ok{ border-color: rgba(0,255,140,.25); background: rgba(0,255,140,.08); color:#c9ffea; }
+    .tag.warn{ border-color: rgba(255,200,0,.25); background: rgba(255,200,0,.08); color:#ffe8a7; }
+
+    .rowActions{ display:flex; gap: 8px; flex-wrap:wrap; justify-content:flex-end; }
+    .rowActions .btn{ padding: 8px 10px; border-radius: 12px; font-size: 12px; }
+
+    /* Login */
+    .loginWrap{
+      min-height: calc(100vh - 72px);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 18px;
+    }
+    .loginCard{
+      width: min(420px, 100%);
+      background: rgba(18,18,26,.85);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .loginHeader{ padding: 16px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .loginHeader h1{ margin:0; font-size: 18px; font-weight: 1000; }
+    .loginHeader p{ margin: 6px 0 0; color: var(--muted2); font-size: 12px; }
+    .loginBody{ padding: 16px; display:grid; gap: 10px; }
+
+    /* Notifs panel */
+    .notifPanel{
+      position: absolute;
+      right: 18px;
+      top: 64px;
+      width: min(420px, calc(100vw - 24px));
+      max-height: 70vh;
+      overflow:auto;
+      background: rgba(15,15,20,.98);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      display:none;
+      padding: 12px;
+    }
+    .notifPanel.open{ display:block; }
+    .notifHeader{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .notifH{ font-weight: 1000; }
+    .notifS{ font-size: 12px; color: var(--muted2); margin-top: 2px; }
+    .notifList{ display:flex; flex-direction:column; gap: 10px; }
+    .notifItem{
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+    }
+    .notifTop{ display:flex; justify-content:space-between; gap: 10px; }
+    .notifTitle{ font-weight: 900; }
+    .notifTime{ font-size: 12px; color: var(--muted2); white-space: nowrap; }
+    .notifDetail{ margin-top: 6px; font-size: 13px; color: var(--muted); }
+
+    /* Cadastro */
+    .cadList{ display:flex; flex-direction:column; gap: 10px; }
+    .cadRow{
+      display:flex; align-items:flex-start; justify-content:space-between; gap: 10px;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+    }
+    .cadName{ font-weight: 1000; }
+    .vipBadge{
+      display:inline-flex;
+      align-items:center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      margin-left: 8px;
+      font-size: 11px;
+      font-weight: 1000;
+      letter-spacing: .06em;
+      background: rgba(225,6,0,.20);
+      border: 1px solid rgba(225,6,0,.35);
+      color: #ffd0d0;
+    }
+    .cadMeta{ display:flex; gap: 6px; flex-wrap:wrap; margin-top: 6px; }
+    .cadActions{ display:flex; gap: 8px; flex-wrap:wrap; justify-content:flex-end; }
+
+    /* Modal */
+    .modalOverlay{
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.62);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding: 16px;
+      z-index: 30;
+    }
+    .modalOverlay.open{ display:flex; }
+    .modalCard{
+      width: min(560px, 100%);
+      background: rgba(15,15,20,.98);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .modalHeader{
+      padding: 14px;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 10px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .modalTitle{ font-weight: 1000; font-size: 16px; }
+    .modalSub{ font-size: 12px; color: var(--muted2); margin-top: 4px; }
+    .modalBody{ padding: 14px; }
+    .modalActions{ margin-top: 14px; display:flex; gap: 10px; align-items:center; }
+
+    /* Toast */
+    .toast{
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      background: rgba(15,15,20,.95);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: white;
+      font-weight: 900;
+      font-size: 13px;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events:none;
+      transition: .18s ease;
+      z-index: 40;
+      max-width: calc(100vw - 24px);
+      text-align:center;
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+    .toast.show{ opacity: 1; }
+
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="topbarInner">
+      <div class="brand">
+        <div class="logo">SG</div>
+        <div class="titleBox">
+          <p class="title">DashBoard Santos Games Corujões</p>
+          <p class="subtitle" id="userLine">Controle interno • 2026</p>
         </div>
-        <div class="meta">
-          <span class="pill">R$${Number(d.valor)}</span>
-          <span class="pill ${d.status === "Pago" ? "ok" : "warn"}">${d.status}</span>
-          ${isConfirmado ? `<span class="tag ok">Confirmado</span>` : `<span class="tag warn">Espera</span>`}
+      </div>
+
+      <div class="tabs" id="tabs" style="display:none;">
+        <button class="tab active" id="tabReserva" type="button">Reserva</button>
+        <button class="tab" id="tabCadastro" type="button">Cadastro</button>
+      </div>
+
+      <div class="actions" id="actions" style="display:none;">
+        <button class="iconBtn" id="notifBtn" type="button" title="Notificações">🔔<span id="notifBadge" class="notifBadge"></span></button>
+        <button class="btn ghost" id="logoutBtn" type="button">Sair</button>
+
+        <div id="notifPanel" class="notifPanel">
+          <div class="notifHeader">
+            <div>
+              <div class="notifH">Notificações</div>
+              <div class="notifS">Ações recentes</div>
+            </div>
+            <button class="btn ghost" id="notifClearBtn" type="button">Limpar</button>
+          </div>
+          <div id="notifList" class="notifList"></div>
         </div>
       </div>
-      <div class="rowActions">
-        ${!isConfirmado ? `
-          <button class="btn" onclick="promoteToConfirmed(\'${dateStr}\',\'${id}\')">Subir p/ confirmados</button>
-          <button class="btn ghost" onclick="copyText(buildContactText(d))">Copiar contato</button>
-          ${buildWhatsAppLink(d) ? `<a class="btn ghost linkbtn" href="${buildWhatsAppLink(d)}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
-          ${buildInstagramLink(d) ? `<a class="btn ghost linkbtn" href="${buildInstagramLink(d)}" target="_blank" rel="noopener">Instagram</a>` : ``}
-        ` : ``}
-        <button class="btn ghost" onclick="updateStatus('${dateStr}','${id}','Pago')">Pago</button>
-        <button class="btn ghost" onclick="updateStatus('${dateStr}','${id}','Pendente')">Pendente</button>
-        <button class="btn danger" onclick="removeParticipant('${dateStr}','${id}')">Remover</button>
+    </div>
+  </div>
+
+  <!-- LOGIN -->
+  <div id="loginScreen" class="loginWrap">
+    <div class="loginCard">
+      <div class="loginHeader">
+        <h1>Entrar</h1>
+        <p>Use um usuário já cadastrado no Firebase Authentication</p>
+      </div>
+      <div class="loginBody">
+        <input class="input" id="email" placeholder="Email" />
+        <input class="input" id="senha" placeholder="Senha" type="password" />
+        <button class="btn primary" id="loginBtn" type="button">Entrar</button>
+        <div style="color:var(--muted2); font-size:12px; line-height:1.4;">
+          Dica: se der erro <b>auth/unauthorized-domain</b>, autorize o domínio da Vercel no Firebase.
+        </div>
       </div>
     </div>
-  `;
-}
+  </div>
 
-window.closeDayPanel = () => {
-  dayPanel.classList.remove("open");
-};
+  <!-- APP -->
+  <div id="app" class="wrap" style="display:none;">
 
+    <div id="viewReserva">
+      <div class="grid">
+        <div class="card">
+          <div class="cardHeader">
+            <div>
+              <h2>Calendário • 2026</h2>
+              <p>Clique em um dia para ver reservas</p>
+            </div>
+            <div class="monthNav">
+              <button class="navBtn" id="prevMonthBtn" type="button" title="Mês anterior">◀</button>
+              <button class="navBtn" id="nextMonthBtn" type="button" title="Próximo mês">▶</button>
+            </div>
+          </div>
+          <div class="inner">
+            <div class="monthBar">
+              <div class="monthTitle" id="monthTitle">Janeiro</div>
+              <span class="pill subtle" id="monthHint">Somente 2026</span>
+            </div>
 
-window.addParticipant = async () => {
-  if(!selectedDateStr) return toast("Selecione um dia no calendário.");
+            <div class="dow">
+              <div>D</div><div>S</div><div>T</div><div>Q</div><div>Q</div><div>S</div><div>S</div>
+            </div>
 
-  const nome = newName.value.trim();
-  const telefone = (newPhone?.value || "").trim();
-  const instagram = (newInsta?.value || "").trim();
-  const valor = document.querySelector('input[name="valor"]:checked')?.value;
-  const status = document.querySelector('input[name="status"]:checked')?.value;
+            <div class="calendar" id="calendar"></div>
+          </div>
+        </div>
 
-  if(!nome) return toast("Digite o nome do participante.");
+        <div class="card">
+          <div class="cardHeader">
+            <div>
+              <h2>Resumo do mês</h2>
+              <p>Confirmados ocupam vaga (Pago)</p>
+            </div>
+          </div>
+          <div class="inner">
+            <div class="rowLine">
+              <span class="pill ok" id="kpiConfirmados">Confirmados: 0</span>
+              <span class="pill warn" id="kpiPendentes">Pendentes: 0</span>
+              <span class="pill subtle" id="kpiEspera">Espera: 0</span>
+            </div>
+            <div class="emptyState">Clique em um dia para gerenciar as reservas.</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-  // Bloqueio: se já houver 10 confirmados (Pago), não permite adicionar mais ninguém
-  const q = query(collection(db, "corujoes", selectedDateStr, "participantes"), orderBy("createdAt","asc"));
-  const snap = await getDocs(q);
-  let confirmados = 0;
-  snap.forEach(docSnap => {
-    const d = docSnap.data();
-    if(d.status === "Pago" && confirmados < 10) confirmados++;
-  });
-  if(confirmados >= 10){
-    toast("Limite de 10 confirmados atingido. Não é possível adicionar mais pessoas.");
-    pushNotif("Tentativa bloqueada", `Dia ${selectedDateStr} já tem 10 confirmados.`);
-    return;
-  }
+    <div id="viewCadastro" style="display:none;">
+      <div class="card" style="margin-top:14px;">
+        <div class="cardHeader">
+          <div>
+            <h2>Cadastro</h2>
+            <p>Base de contatos (nome, telefone, instagram)</p>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <input id="cadSearch" class="input" placeholder="Buscar por nome, telefone ou instagram" style="width:320px; max-width: 55vw;" />
+            <button class="btn" id="cadNewBtn" type="button">Novo contato</button>
+          </div>
+        </div>
+        <div class="inner">
+          <div id="cadList" class="cadList"></div>
+        </div>
+      </div>
+    </div>
 
-  await addDoc(collection(db, "corujoes", selectedDateStr, "participantes"), {
-    nome,
-    telefone,
-    instagram,
-    valor,
-    status,
-    createdAt: Date.now()
-  });
+  </div>
 
-  // Atualiza base de cadastro
-  await upsertCadastro({ nome, telefone, instagram });
+  <!-- DAY PANEL -->
+  <div id="dayPanel" class="dayPanel" aria-hidden="true">
+    <div class="dayCard">
+      <div class="dayTop">
+        <div>
+          <h3 id="dayTitle">Dia</h3>
+          <div class="small" id="dayStats">Confirmados: 0/10 • Espera: 0</div>
+        </div>
+        <button class="btn ghost" id="closeDayBtn" type="button">Fechar</button>
+      </div>
+      <div class="dayBody">
+        <div class="form">
+          <div>
+            <div class="sectionLabel">Adicionar pessoa</div>
+            <input id="newName" class="input" placeholder="Nome do participante" autocomplete="off" />
+            <div style="height:10px"></div>
+            <div class="twoInputs">
+              <input id="newPhone" class="input" inputmode="tel" placeholder="Telefone (opcional)" />
+              <input id="newInsta" class="input" placeholder="Instagram (opcional)" />
+            </div>
+            <div style="height:10px"></div>
 
-  newName.value = "";
-  if(newPhone) newPhone.value = "";
-  if(newInsta) newInsta.value = "";
+            <div class="sectionLabel">Valor</div>
+            <div class="choices">
+              <label class="choice"><input type="radio" name="valor" value="100" checked> R$ 100</label>
+              <label class="choice"><input type="radio" name="valor" value="140"> R$ 140</label>
+            </div>
 
-  pushNotif("Nova reserva adicionada", `${nome} • ${selectedDateStr}`);
-};
+            <div class="sectionLabel">Status</div>
+            <div class="choices">
+              <label class="choice"><input type="radio" name="status" value="Pendente" checked> Pendente</label>
+              <label class="choice"><input type="radio" name="status" value="Pago"> Pago</label>
+            </div>
 
+            <div style="height:12px"></div>
+            <button class="btn primary" id="addBtn" type="button">Adicionar</button>
 
+            <div style="margin-top:10px; color:var(--muted2); font-size:12px; line-height:1.4;">
+              Regras: só <b>Pago</b> ocupa as 10 vagas confirmadas. Pendente vai para espera.
+            </div>
+          </div>
 
-window.promoteToConfirmed = async (dateStr, id) => {
-  // Só promove se houver vaga disponível (menos de 10 pagos)
-  const q = query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc"));
-  const snap = await getDocs(q);
-  let confirmados = 0;
-  snap.forEach(docSnap => {
-    const d = docSnap.data();
-    if(d.status === "Pago" && confirmados < 10) confirmados++;
-  });
-  if(confirmados >= 10){
-    toast("Já existem 10 confirmados.");
-    pushNotif("Promoção não realizada", `Dia ${dateStr} já tem 10 confirmados.`);
-    return;
-  }
-  await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status: "Pago" });
-  toast("Promovido para confirmado (Pago).");
-  pushNotif("Promovido para confirmado", `Dia ${dateStr}`);
-};
+          <div>
+            <div class="stack">
+              <div>
+                <div class="stackHeader">
+                  <h4>Confirmados</h4>
+                  <span class="pill ok" id="confCount">0/10</span>
+                </div>
+                <div id="confList" class="list"></div>
+              </div>
 
-window.updateStatus = async (dateStr, id, status) => {
-  await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status });
-  pushNotif("Status atualizado", `Dia ${dateStr} → ${status}`);
-};
+              <div>
+                <div class="stackHeader">
+                  <h4>Lista de espera</h4>
+                  <span class="pill subtle" id="esperaCount">0</span>
+                </div>
+                <div id="esperaList" class="list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-window.removeParticipant = async (dateStr, id) => {
-  await deleteDoc(doc(db, "corujoes", dateStr, "participantes", id));
-  pushNotif("Reserva removida", `Dia ${dateStr}`);
-};
+      </div>
+    </div>
+  </div>
 
+  <!-- CADASTRO MODAL -->
+  <div id="cadModal" class="modalOverlay" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div>
+          <div class="modalTitle" id="cadModalTitle">Cadastro</div>
+          <div class="modalSub" id="cadModalSub">Editar contato</div>
+        </div>
+        <button class="btn ghost" id="cadModalCloseBtn" type="button">Fechar</button>
+      </div>
 
+      <div class="modalBody">
+        <div class="twoInputs">
+          <input id="cadEditNome" class="input" placeholder="Nome" />
+          <input id="cadEditTelefone" class="input" inputmode="tel" placeholder="Telefone" />
+        </div>
+        <div style="height:10px"></div>
+        <input id="cadEditInstagram" class="input" placeholder="Instagram" />
+        <div style="height:10px"></div>
+        <label class="choice" style="width:fit-content;">
+          <input id="cadEditVip" type="checkbox" /> VIP / Cliente frequente
+        </label>
 
-window.showTab = (tab) => {
-  const reservaEl = document.getElementById("reserva");
-  const faturamentoEl = document.getElementById("faturamento");
-  const cadastroEl = document.getElementById("cadastro");
+        <div class="modalActions">
+          <button class="btn danger" id="cadModalDeleteBtn" type="button">Excluir</button>
+          <div style="flex:1"></div>
+          <button class="btn ghost" id="cadModalCancelBtn" type="button">Cancelar</button>
+          <button class="btn primary" id="cadModalSaveBtn" type="button">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  reservaEl.style.display = tab === "reserva" ? "block" : "none";
-  faturamentoEl.style.display = tab === "faturamento" ? "block" : "none";
-  cadastroEl.style.display = tab === "cadastro" ? "block" : "none";
+  <div id="toast" class="toast"></div>
 
-  document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
-  const map = { reserva: "tabReserva", faturamento: "tabFaturamento", cadastro: "tabCadastro" };
-  document.getElementById(map[tab]).classList.add("active");
+  <script type="module">
+    // =========================================================
+    //  DashBoard Santos Games Corujões (Clean Rebuild)
+    //  - Single file (index.html)
+    //  - Firebase Auth + Firestore
+    //  - Jan–Dez 2026
+    //  - Reserva (Confirmados/Espera) + Cadastro + Notificações
+    //  - Sem onclick (somente addEventListener / delegação)
+    // =========================================================
 
-  if(tab === "faturamento") refreshFaturamento();
-  if(tab === "cadastro") wireCadastro();
-};
+    // ===== Firebase (CDN) =====
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import {
+      getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, getDocs, setDoc,
+      query, orderBy
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-  document.getElementById(map[tab]).classList.add("active");
-
-  if(tab === "faturamento") refreshFaturamento();
-  if(tab === "cadastro") wireCadastro();
-};
-
-
-
-let cadastroWired = false;
-function wireCadastro(){
-  if(cadastroWired) return;
-  cadastroWired = true;
-
-  const cadListEl = document.getElementById("cadList");
-  const cadSearchEl = document.getElementById("cadSearch");
-
-const q = query(collection(db, "cadastro"), orderBy("updatedAt","desc"));
-  onSnapshot(q, snap => {
-    const rows = [];
-    snap.forEach(docSnap => {
-      const d = docSnap.data();
-      rows.push({
-        id: docSnap.id,
-        nome: d.nome || "",
-        telefone: d.telefone || "",
-        instagram: d.instagram || "",
-        lastDate: d.lastDate || "",
-        updatedAt: d.updatedAt || 0
-      });
-    });
-
-    const mapById = new Map(rows.map(r => [r.id, r]));
-    window.openCadModalFromRow = (id) => {
-      const obj = mapById.get(id);
-      if(!obj) return toast("Cadastro não encontrado.");
-      openCadModal(id, obj);
+    // ✅ COLE AQUI seu firebaseConfig
+    const firebaseConfig = {
+      apiKey: "SUA_API_KEY",
+      authDomain: "SEU_AUTH_DOMAIN",
+      projectId: "SEU_PROJECT_ID",
+      appId: "SEU_APP_ID"
     };
 
-    function render(filter=""){
-      const f = filter.trim().toLowerCase();
+    const appFB = initializeApp(firebaseConfig);
+    const auth = getAuth(appFB);
+    const db = getFirestore(appFB);
+
+    // ===== State =====
+    const YEAR = 2026;
+    const MONTHS = [
+      "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+      "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+    ];
+    let currentMonth = 0; // 0..11
+    let selectedDateStr = null;
+    let unsubDay = null;
+    let unsubCadastro = null;
+    let cadCache = new Map(); // id -> data
+
+    // ===== DOM =====
+    const $ = (id) => document.getElementById(id);
+
+    const loginScreen = $("loginScreen");
+    const appWrap = $("app");
+    const tabs = $("tabs");
+    const actions = $("actions");
+
+    const tabReserva = $("tabReserva");
+    const tabCadastro = $("tabCadastro");
+
+    const viewReserva = $("viewReserva");
+    const viewCadastro = $("viewCadastro");
+
+    const calendarEl = $("calendar");
+    const monthTitleEl = $("monthTitle");
+    const prevMonthBtn = $("prevMonthBtn");
+    const nextMonthBtn = $("nextMonthBtn");
+
+    const kpiConfirmados = $("kpiConfirmados");
+    const kpiPendentes = $("kpiPendentes");
+    const kpiEspera = $("kpiEspera");
+
+    const loginBtn = $("loginBtn");
+    const logoutBtn = $("logoutBtn");
+    const notifBtn = $("notifBtn");
+    const notifPanel = $("notifPanel");
+    const notifBadge = $("notifBadge");
+    const notifList = $("notifList");
+    const notifClearBtn = $("notifClearBtn");
+
+    const dayPanel = $("dayPanel");
+    const closeDayBtn = $("closeDayBtn");
+    const dayTitle = $("dayTitle");
+    const dayStats = $("dayStats");
+    const addBtn = $("addBtn");
+    const newName = $("newName");
+    const newPhone = $("newPhone");
+    const newInsta = $("newInsta");
+    const confCount = $("confCount");
+    const esperaCount = $("esperaCount");
+    const confList = $("confList");
+    const esperaList = $("esperaList");
+
+    const cadSearch = $("cadSearch");
+    const cadList = $("cadList");
+    const cadNewBtn = $("cadNewBtn");
+
+    const cadModal = $("cadModal");
+    const cadModalCloseBtn = $("cadModalCloseBtn");
+    const cadModalCancelBtn = $("cadModalCancelBtn");
+    const cadModalSaveBtn = $("cadModalSaveBtn");
+    const cadModalDeleteBtn = $("cadModalDeleteBtn");
+    const cadModalTitle = $("cadModalTitle");
+    const cadModalSub = $("cadModalSub");
+    const cadEditNome = $("cadEditNome");
+    const cadEditTelefone = $("cadEditTelefone");
+    const cadEditInstagram = $("cadEditInstagram");
+    const cadEditVip = $("cadEditVip");
+
+    const toastEl = $("toast");
+
+    // ===== UI helpers =====
+    let toastTimer = null;
+    function toast(msg){
+      toastEl.textContent = msg;
+      toastEl.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(()=> toastEl.classList.remove("show"), 2200);
+    }
+
+    function escapeHtml(str){
+      return String(str ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function normalizePhone(phone){
+      return String(phone || "").replace(/\D/g, "");
+    }
+
+    async function copyText(text){
+      try{
+        if(!text) return toast("Sem contato para copiar.");
+        await navigator.clipboard.writeText(text);
+        toast("Contato copiado!");
+      }catch(e){
+        try{
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+          toast("Contato copiado!");
+        }catch(_){
+          toast("Não foi possível copiar.");
+        }
+      }
+    }
+
+    function buildContactText(d){
+      const parts = [];
+      if(d?.nome) parts.push(d.nome);
+      if(d?.telefone) parts.push("Telefone: " + d.telefone);
+      if(d?.instagram) parts.push("Instagram: " + d.instagram);
+      return parts.join(" • ");
+    }
+
+    // ===== Notificações (localStorage) =====
+    const NOTIF_KEY = "sg_notifs_v2";
+    function loadNotifs(){
+      try{ return JSON.parse(localStorage.getItem(NOTIF_KEY) || "[]"); }catch(e){ return []; }
+    }
+    function saveNotifs(list){
+      localStorage.setItem(NOTIF_KEY, JSON.stringify(list.slice(0, 40)));
+    }
+    function pushNotif(title, detail=""){
+      const list = loadNotifs();
+      list.unshift({ title, detail, at: Date.now() });
+      saveNotifs(list);
+      renderNotifs();
+    }
+    function formatDateTime(ts){
+      try{ return new Date(ts).toLocaleString("pt-BR"); }catch(e){ return ""; }
+    }
+    function renderNotifs(){
+      const list = loadNotifs();
+      notifBadge.textContent = list.length ? String(list.length) : "";
+      if(list.length === 0){
+        notifList.innerHTML = `<div class="emptyState">Sem notificações.</div>`;
+        return;
+      }
+      notifList.innerHTML = list.map(n => `
+        <div class="notifItem">
+          <div class="notifTop">
+            <div class="notifTitle">${escapeHtml(n.title)}</div>
+            <div class="notifTime">${formatDateTime(n.at)}</div>
+          </div>
+          ${n.detail ? `<div class="notifDetail">${escapeHtml(n.detail)}</div>` : ``}
+        </div>
+      `).join("");
+    }
+
+    // ===== Tabs =====
+    function showTab(tab){
+      tabReserva.classList.toggle("active", tab === "reserva");
+      tabCadastro.classList.toggle("active", tab === "cadastro");
+      viewReserva.style.display = tab === "reserva" ? "block" : "none";
+      viewCadastro.style.display = tab === "cadastro" ? "block" : "none";
+      if(tab === "cadastro") wireCadastro();
+    }
+
+    // ===== Calendar =====
+    function pad2(n){ return String(n).padStart(2,"0"); }
+    function ymd(y,m,d){ return `${y}-${pad2(m)}-${pad2(d)}`; }
+
+    function daysInMonth(year, monthIdx0){
+      return new Date(year, monthIdx0+1, 0).getDate();
+    }
+
+    function firstDowIndex(year, monthIdx0){
+      // JS: 0=Sunday ... 6=Saturday
+      return new Date(year, monthIdx0, 1).getDay();
+    }
+
+    function setMonthNavButtons(){
+      prevMonthBtn.disabled = currentMonth <= 0;
+      nextMonthBtn.disabled = currentMonth >= 11;
+    }
+
+    function renderCalendar(){
+      monthTitleEl.textContent = MONTHS[currentMonth];
+      setMonthNavButtons();
+
+      calendarEl.innerHTML = "";
+
+      const totalDays = daysInMonth(YEAR, currentMonth);
+      const first = firstDowIndex(YEAR, currentMonth);
+
+      // empty slots
+      for(let i=0;i<first;i++){
+        const div = document.createElement("div");
+        div.className = "dayBtn disabledDay";
+        div.innerHTML = `<div class="dayNum"> </div>`;
+        calendarEl.appendChild(div);
+      }
+
+      // days
+      for(let d=1; d<=totalDays; d++){
+        const dateStr = ymd(YEAR, currentMonth+1, d);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "dayBtn";
+        btn.setAttribute("data-action","open-day");
+        btn.setAttribute("data-date", dateStr);
+        btn.innerHTML = `
+          <div class="dayNum">${d}</div>
+          <div class="dayMeta">
+            <span class="badge ok" data-badge="paid">0/10</span>
+            <span class="badge warn" data-badge="pend">0</span>
+          </div>
+        `;
+        calendarEl.appendChild(btn);
+        wireDayBadges(btn, dateStr);
+      }
+    }
+
+    // Badge subscription (per day)
+    const badgeUnsubs = new Map(); // dateStr -> unsub
+    function wireDayBadges(dayBtn, dateStr){
+      if(badgeUnsubs.has(dateStr)) return;
+      const paidEl = dayBtn.querySelector('[data-badge="paid"]');
+      const pendEl = dayBtn.querySelector('[data-badge="pend"]');
+
+      const q = query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc"));
+      const unsub = onSnapshot(q, snap => {
+        let paid = 0;
+        let pend = 0;
+        snap.forEach(docSnap => {
+          const d = docSnap.data();
+          if(d.status === "Pago") paid++;
+          else pend++;
+        });
+
+        paidEl.textContent = `${Math.min(paid,10)}/10`;
+        pendEl.textContent = `${pend}`;
+        paidEl.className = "badge ok";
+        pendEl.className = "badge warn";
+        // KPI for month (lazy: computed on demand)
+      });
+      badgeUnsubs.set(dateStr, unsub);
+    }
+
+    // ===== Day panel (Reserva) =====
+    function openDay(dateStr){
+      selectedDateStr = dateStr;
+      dayTitle.textContent = `Reservas • ${dateStr}`;
+      dayPanel.classList.add("open");
+      dayPanel.setAttribute("aria-hidden","false");
+
+      // reset form
+      newName.value = "";
+      newPhone.value = "";
+      newInsta.value = "";
+      document.querySelector('input[name="valor"][value="100"]').checked = true;
+      document.querySelector('input[name="status"][value="Pendente"]').checked = true;
+
+      if(unsubDay) { unsubDay(); unsubDay = null; }
+
+      const q = query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc"));
+      unsubDay = onSnapshot(q, snap => {
+        const docs = [];
+        snap.forEach(d => docs.push(d));
+
+        // Regra: somente Pago ocupa as 10 vagas de confirmados
+        const confirmados = [];
+        const espera = [];
+        docs.forEach(docSnap => {
+          const d = docSnap.data();
+          if(d.status === "Pago" && confirmados.length < 10) confirmados.push(docSnap);
+          else espera.push(docSnap);
+        });
+
+        confCount.textContent = `${confirmados.length}/10`;
+        esperaCount.textContent = `${espera.length}`;
+        dayStats.textContent = `Confirmados: ${confirmados.length}/10 • Espera: ${espera.length}`;
+
+        confList.innerHTML = "";
+        if(confirmados.length === 0){
+          confList.innerHTML = `<div class="emptyState">Nenhuma reserva confirmada (Pago) ainda.</div>`;
+        } else {
+          confirmados.forEach(docSnap => confList.insertAdjacentHTML("beforeend", rowHtml(dateStr, docSnap.id, docSnap.data(), true)));
+        }
+
+        esperaList.innerHTML = "";
+        if(espera.length === 0){
+          esperaList.innerHTML = `<div class="emptyState">Sem pessoas na lista de espera.</div>`;
+        } else {
+          espera.forEach(docSnap => esperaList.insertAdjacentHTML("beforeend", rowHtml(dateStr, docSnap.id, docSnap.data(), false)));
+        }
+      });
+    }
+
+    function closeDay(){
+      dayPanel.classList.remove("open");
+      dayPanel.setAttribute("aria-hidden","true");
+    }
+
+    function rowHtml(dateStr, id, d, isConfirmado){
+      const phone = d.telefone ? `<span class="pill subtle">📞 ${escapeHtml(d.telefone)}</span>` : ``;
+      const insta = d.instagram ? `<span class="pill subtle">📷 ${escapeHtml(d.instagram)}</span>` : ``;
+      const val = `<span class="pill">R$${Number(d.valor || 0)}</span>`;
+      const st = `<span class="pill ${d.status === "Pago" ? "ok" : "warn"}">${escapeHtml(d.status || "")}</span>`;
+      const tag = isConfirmado ? `<span class="tag ok">Confirmado</span>` : `<span class="tag warn">Espera</span>`;
+
+      const promoteBtn = (!isConfirmado)
+        ? `<button class="btn" data-action="promote" data-id="${id}" data-date="${dateStr}" type="button">Subir p/ confirmados</button>`
+        : ``;
+
+      const waLink = buildWhatsAppLink(d);
+      const igLink = buildInstagramLink(d);
+
+      const contactActions = (!isConfirmado)
+        ? `
+          <button class="btn ghost" data-action="copy" data-id="${id}" data-date="${dateStr}" type="button">Copiar</button>
+          ${waLink ? `<a class="btn ghost" href="${waLink}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
+          ${igLink ? `<a class="btn ghost" href="${igLink}" target="_blank" rel="noopener">Instagram</a>` : ``}
+        `
+        : ``;
+
+      return `
+        <div class="row" data-row="${id}">
+          <div class="rowLeft">
+            <div class="name">${escapeHtml(d.nome || "")}</div>
+            <div class="contact">${phone}${insta}</div>
+            <div class="meta">${val}${st}${tag}</div>
+          </div>
+          <div class="rowActions">
+            ${promoteBtn}
+            ${contactActions}
+            <button class="btn ghost" data-action="set-status" data-status="Pago" data-id="${id}" data-date="${dateStr}" type="button">Pago</button>
+            <button class="btn ghost" data-action="set-status" data-status="Pendente" data-id="${id}" data-date="${dateStr}" type="button">Pendente</button>
+            <button class="btn danger" data-action="remove" data-id="${id}" data-date="${dateStr}" type="button">Remover</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function buildWhatsAppLink(d){
+      const digits = normalizePhone(d?.telefone);
+      if(!digits) return null;
+      const number = digits.startsWith("55") ? digits : ("55" + digits);
+      const text = `Olá, aqui é da Santos Games Arena. Sua vaga no Corujão (${selectedDateStr || "data"}) ficou disponível. Confirma presença?`;
+      return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+    }
+    function buildInstagramLink(d){
+      const raw = String(d?.instagram || "").trim();
+      if(!raw) return null;
+      const handle = raw.replace(/^@/, "").replace(/\s+/g,"");
+      if(!handle) return null;
+      return `https://instagram.com/${encodeURIComponent(handle)}`;
+    }
+
+    // ===== Cadastro (Firestore) =====
+    function cadastroIdFrom({ telefone, instagram, nome }){
+      const phoneDigits = normalizePhone(telefone);
+      const instaHandle = String(instagram || "").trim().replace(/^@/,"").replace(/\s+/g,"");
+      if(phoneDigits) return "tel_" + phoneDigits;
+      if(instaHandle) return "ig_" + instaHandle.toLowerCase();
+      const n = String(nome||"").trim().toLowerCase().replace(/\s+/g,"_").slice(0,40);
+      return n ? "nome_" + n : null;
+    }
+
+    async function upsertCadastro({ nome, telefone, instagram }){
+      const id = cadastroIdFrom({ telefone, instagram, nome });
+      if(!id) return;
+      await setDoc(doc(db, "cadastro", id), {
+        nome: nome || "",
+        telefone: telefone || "",
+        instagram: instagram || "",
+        vip: false,
+        updatedAt: Date.now(),
+        lastDate: selectedDateStr || ""
+      }, { merge: true });
+    }
+
+    function wireCadastro(){
+      if(unsubCadastro) return; // já wired
+      const q = query(collection(db, "cadastro"), orderBy("updatedAt","desc"));
+      unsubCadastro = onSnapshot(q, snap => {
+        cadCache = new Map();
+        snap.forEach(docSnap => cadCache.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } ));
+        renderCadastro();
+      });
+      renderCadastro();
+    }
+
+    function renderCadastro(){
+      const f = (cadSearch.value || "").trim().toLowerCase();
+      const rows = Array.from(cadCache.values());
       const filtered = !f ? rows : rows.filter(r =>
-        r.nome.toLowerCase().includes(f) ||
-        r.telefone.toLowerCase().includes(f) ||
-        r.instagram.toLowerCase().includes(f)
+        String(r.nome||"").toLowerCase().includes(f) ||
+        String(r.telefone||"").toLowerCase().includes(f) ||
+        String(r.instagram||"").toLowerCase().includes(f)
       );
 
       if(filtered.length === 0){
-        cadListEl.innerHTML = `<div class="emptyState">Nenhum cadastro encontrado.</div>`;
+        cadList.innerHTML = `<div class="emptyState">Nenhum cadastro encontrado.</div>`;
         return;
       }
 
-      
-cadListEl.innerHTML = filtered.map(r => `
+      cadList.innerHTML = filtered.map(r => `
         <div class="cadRow">
-          <div class="cadLeft">
-            <div class="cadName">${escapeHtml(r.nome)} ${r.vip ? `<span class="vipBadge">VIP</span>` : ``}</div>
+          <div class="rowLeft">
+            <div class="cadName">${escapeHtml(r.nome || "")} ${r.vip ? `<span class="vipBadge">VIP</span>` : ``}</div>
             <div class="cadMeta">
               ${r.telefone ? `<span class="pill subtle">📞 ${escapeHtml(r.telefone)}</span>` : ``}
               ${r.instagram ? `<span class="pill subtle">📷 ${escapeHtml(r.instagram)}</span>` : ``}
@@ -470,947 +1240,324 @@ cadListEl.innerHTML = filtered.map(r => `
             </div>
           </div>
           <div class="cadActions">
-            ${r.telefone ? `<a class="btn ghost linkbtn" href="https://wa.me/${normalizePhone(r.telefone).startsWith('55')?normalizePhone(r.telefone):('55'+normalizePhone(r.telefone))}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
-            ${r.instagram ? `<a class="btn ghost linkbtn" href="https://instagram.com/${encodeURIComponent(String(r.instagram).trim().replace(/^@/,''))}" target="_blank" rel="noopener">Instagram</a>` : ``}
-            <button class="btn ghost" onclick="copyText(buildContactText(r))">Copiar</button>
-            <button class="btn ghost" onclick="toggleVip('${r.id}', ${!r.vip})">${r.vip ? "Remover VIP" : "Marcar VIP"}</button>
-            <button class="btn" onclick="openCadModalFromRow('${r.id}')">Editar</button>
+            ${r.telefone ? `<a class="btn ghost" href="https://wa.me/${(normalizePhone(r.telefone).startsWith("55")?normalizePhone(r.telefone):("55"+normalizePhone(r.telefone)))}" target="_blank" rel="noopener">WhatsApp</a>` : ``}
+            ${r.instagram ? `<a class="btn ghost" href="https://instagram.com/${encodeURIComponent(String(r.instagram).trim().replace(/^@/,''))}" target="_blank" rel="noopener">Instagram</a>` : ``}
+            <button class="btn ghost" data-action="cad-copy" data-id="${r.id}" type="button">Copiar</button>
+            <button class="btn ghost" data-action="cad-vip" data-id="${r.id}" data-vip="${!r.vip}" type="button">${r.vip ? "Remover VIP" : "Marcar VIP"}</button>
+            <button class="btn" data-action="cad-edit" data-id="${r.id}" type="button">Editar</button>
           </div>
         </div>
       `).join("");
-
     }
 
-    render(cadSearchEl?.value || "");
-    if(cadSearchEl){
-      cadSearchEl.oninput = () => render(cadSearchEl.value || "");
+    let currentCadId = null;
+    function openCadModal(id=null){
+      currentCadId = id;
+      const obj = id ? cadCache.get(id) : null;
+      cadModalTitle.textContent = id ? "Editar cadastro" : "Novo cadastro";
+      cadModalSub.textContent = id ? `ID: ${id}` : "Crie um novo contato";
+      cadEditNome.value = obj?.nome || "";
+      cadEditTelefone.value = obj?.telefone || "";
+      cadEditInstagram.value = obj?.instagram || "";
+      cadEditVip.checked = !!obj?.vip;
+      cadModal.classList.add("open");
+      cadModal.setAttribute("aria-hidden","false");
     }
-  });
-}
+    function closeCadModal(){
+      cadModal.classList.remove("open");
+      cadModal.setAttribute("aria-hidden","true");
+      currentCadId = null;
+    }
+    async function saveCad(){
+      const nome = (cadEditNome.value || "").trim();
+      const telefone = (cadEditTelefone.value || "").trim();
+      const instagram = (cadEditInstagram.value || "").trim();
+      const vip = !!cadEditVip.checked;
 
+      let id = currentCadId;
+      if(!id){
+        id = cadastroIdFrom({ telefone, instagram, nome });
+        if(!id) return toast("Informe ao menos nome/telefone/instagram.");
+      }
 
-let currentCadId = null;
-let currentCadObj = null;
+      await setDoc(doc(db, "cadastro", id), {
+        nome, telefone, instagram, vip,
+        updatedAt: Date.now()
+      }, { merge: true });
 
-window.openCadModal = (id, obj) => {
-  currentCadId = id;
-  currentCadObj = obj || {};
-  cadModalSub.textContent = `ID: ${id}`;
-  cadEditNome.value = currentCadObj.nome || "";
-  cadEditTelefone.value = currentCadObj.telefone || "";
-  cadEditInstagram.value = currentCadObj.instagram || "";
-  cadEditVip.checked = !!currentCadObj.vip;
-  document.getElementById("cadModal").style.display = "block";
-};
+      pushNotif("Cadastro salvo", nome || id);
+      toast("Cadastro salvo.");
+      closeCadModal();
+    }
+    async function deleteCad(){
+      if(!currentCadId) return toast("Nada para excluir.");
+      const obj = cadCache.get(currentCadId);
+      const nome = obj?.nome || currentCadId;
+      if(!confirm(`Excluir cadastro de "${nome}"?`)) return;
+      await deleteDoc(doc(db, "cadastro", currentCadId));
+      pushNotif("Cadastro excluído", nome);
+      toast("Cadastro excluído.");
+      closeCadModal();
+    }
+    async function toggleVip(id, newVip){
+      await updateDoc(doc(db, "cadastro", id), { vip: !!newVip, updatedAt: Date.now() });
+      pushNotif("VIP atualizado", `${id} → ${newVip ? "VIP" : "Normal"}`);
+      toast("VIP atualizado.");
+    }
 
-window.closeCadModal = () => {
-  document.getElementById("cadModal").style.display = "none";
-  currentCadId = null;
-  currentCadObj = null;
-};
+    // ===== Reserva: Add participant (Regra A anti-duplicado) =====
+    async function addParticipant(){
+      if(!selectedDateStr) return toast("Selecione um dia.");
+      const nome = (newName.value || "").trim();
+      const telefone = (newPhone.value || "").trim();
+      const instagram = (newInsta.value || "").trim();
+      const valor = document.querySelector('input[name="valor"]:checked')?.value || "100";
+      const status = document.querySelector('input[name="status"]:checked')?.value || "Pendente";
+      if(!nome) return toast("Digite o nome.");
 
-window.saveCad = async () => {
-  if(!currentCadId) return;
-  const nome = (cadEditNome.value || "").trim();
-  const telefone = (cadEditTelefone.value || "").trim();
-  const instagram = (cadEditInstagram.value || "").trim();
-  const vip = !!cadEditVip.checked;
+      // Regras:
+      // 1) Não permitir adicionar se já houver 10 confirmados (Pago)
+      // 2) Anti-duplicado no dia: telefone OU instagram já existentes
+      const q = query(collection(db, "corujoes", selectedDateStr, "participantes"), orderBy("createdAt","asc"));
+      const snap = await getDocs(q);
 
-  await updateDoc(doc(db, "cadastro", currentCadId), {
-    nome, telefone, instagram, vip, updatedAt: Date.now()
-  });
+      let confirmados = 0;
+      const phoneDigits = normalizePhone(telefone);
+      const instaHandle = String(instagram || "").trim().replace(/^@/,"").toLowerCase();
 
-  pushNotif("Cadastro atualizado", nome || currentCadId);
-  toast("Cadastro atualizado.");
-  closeCadModal();
-};
+      let dup = false;
+      snap.forEach(docSnap => {
+        const d = docSnap.data();
+        if(d.status === "Pago" && confirmados < 10) confirmados++;
 
-window.deleteCad = async () => {
-  if(!currentCadId) return;
-  const nome = currentCadObj?.nome || currentCadId;
-  if(!confirm(`Excluir cadastro de "${nome}"?`)) return;
+        const dPhone = normalizePhone(d.telefone || "");
+        const dInsta = String(d.instagram || "").trim().replace(/^@/,"").toLowerCase();
 
-  await deleteDoc(doc(db, "cadastro", currentCadId));
-  pushNotif("Cadastro excluído", nome);
-  toast("Cadastro excluído.");
-  closeCadModal();
-};
+        if(phoneDigits && dPhone && phoneDigits == dPhone) dup = true;
+        if(instaHandle && dInsta && instaHandle == dInsta) dup = true;
+      });
 
-window.toggleVip = async (id, newVip) => {
-  await updateDoc(doc(db, "cadastro", id), { vip: !!newVip, updatedAt: Date.now() });
-  pushNotif("VIP atualizado", `${id} → ${newVip ? "VIP" : "Normal"}`);
-};
+      if(confirmados >= 10){
+        toast("Limite de 10 confirmados atingido. Não é possível adicionar mais pessoas.");
+        pushNotif("Tentativa bloqueada", `Dia ${selectedDateStr} já tem 10 confirmados.`);
+        return;
+      }
 
-async function refreshFaturamento(){
-  fatMonthLabel.textContent = monthLabelText();
+      if(dup){
+        toast("Já existe alguém com este telefone ou Instagram nesse dia.");
+        pushNotif("Duplicado bloqueado", `${selectedDateStr} • ${nome}`);
+        return;
+      }
 
-  const daysInMonth = new Date(year, currentMonth + 1, 0).getDate();
-  const labels = [];
-  const paidByDay = [];
-  const pendingByDay = [];
+      await addDoc(collection(db, "corujoes", selectedDateStr, "participantes"), {
+        nome, telefone, instagram, valor, status, createdAt: Date.now()
+      });
 
-  let paidTotal = 0;
-  let pendingTotal = 0;
-  let paidCount = 0;
-  let pendingCount = 0;
+      await upsertCadastro({ nome, telefone, instagram });
 
-  // Mix 100/140 (receita total + por status)
-  let total100 = 0, total140 = 0;
-  let pago100 = 0, pago140 = 0;
-  let pend100 = 0, pend140 = 0;
+      newName.value = "";
+      newPhone.value = "";
+      newInsta.value = "";
+      pushNotif("Reserva adicionada", `${nome} • ${selectedDateStr}`);
+      toast("Adicionado.");
+    }
 
-  // Ocupação (contagem no mês)
-  let confirmadosMes = 0;
-  let esperaMes = 0;
+    async function updateStatus(dateStr, id, status){
+      await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status });
+      pushNotif("Status atualizado", `Dia ${dateStr} → ${status}`);
+    }
+    async function removeParticipant(dateStr, id){
+      await deleteDoc(doc(db, "corujoes", dateStr, "participantes", id));
+      pushNotif("Reserva removida", `Dia ${dateStr}`);
+    }
+    async function promoteToConfirmed(dateStr, id){
+      // promove marcando como Pago (se tiver vaga)
+      const q = query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc"));
+      const snap = await getDocs(q);
+      let confirmados = 0;
+      snap.forEach(docSnap => {
+        const d = docSnap.data();
+        if(d.status === "Pago" && confirmados < 10) confirmados++;
+      });
+      if(confirmados >= 10){
+        toast("Já existem 10 confirmados.");
+        pushNotif("Promoção não realizada", `Dia ${dateStr} já tem 10 confirmados.`);
+        return;
+      }
+      await updateDoc(doc(db, "corujoes", dateStr, "participantes", id), { status: "Pago" });
+      toast("Promovido para confirmado (Pago).");
+      pushNotif("Promovido", `Dia ${dateStr}`);
+    }
 
-  for(let d = 1; d <= daysInMonth; d++){
-    const dateStr = `${year}-${String(currentMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-    labels.push(String(d));
+    // ===== Auth =====
+    async function doLogin(){
+      const email = ($("email").value || "").trim();
+      const senha = ($("senha").value || "").trim();
+      if(!email || !senha) return toast("Preencha email e senha.");
+      try{
+        await signInWithEmailAndPassword(auth, email, senha);
+        pushNotif("Login realizado", email);
+      }catch(err){
+        console.error(err);
+        const code = err?.code || "erro-desconhecido";
+        toast("Falha no login: " + code);
+        pushNotif("Falha no login", code);
+      }
+    }
+    async function doLogout(){
+      try{ await signOut(auth); }catch(e){}
+    }
 
-    let paid = 0;
-    let pend = 0;
+    // ===== Delegação de eventos =====
+    function wireEvents(){
+      loginBtn.addEventListener("click", doLogin);
+      logoutBtn.addEventListener("click", doLogout);
 
-    const snap = await getDocs(collection(db, "corujoes", dateStr, "participantes"));
+      tabReserva.addEventListener("click", () => showTab("reserva"));
+      tabCadastro.addEventListener("click", () => showTab("cadastro"));
 
-    // Ocupação por dia (confirmados/espera)
-    const totalDiaCount = snap.size;
-    confirmadosMes += Math.min(totalDiaCount, 10);
-    esperaMes += Math.max(0, totalDiaCount - 10);
+      prevMonthBtn.addEventListener("click", () => { if(currentMonth>0){ currentMonth--; renderCalendar(); } });
+      nextMonthBtn.addEventListener("click", () => { if(currentMonth<11){ currentMonth++; renderCalendar(); } });
 
-    snap.forEach(docSnap => {
-      const data = docSnap.data();
-      const v = Number(data.valor || 0);
+      notifBtn.addEventListener("click", () => {
+        notifPanel.classList.toggle("open");
+        renderNotifs();
+      });
+      notifClearBtn.addEventListener("click", () => {
+        saveNotifs([]);
+        renderNotifs();
+        toast("Notificações limpas.");
+      });
 
-      // Mix 100/140
-      if(v === 100) total100 += 100;
-      if(v === 140) total140 += 140;
+      closeDayBtn.addEventListener("click", closeDay);
+      dayPanel.addEventListener("click", (e) => {
+        if(e.target === dayPanel) closeDay();
+      });
 
-      if(data.status === "Pago"){
-        paid += v; paidTotal += v; paidCount += 1;
-        if(v === 100) pago100 += 100;
-        if(v === 140) pago140 += 140;
-      } else {
-        pend += v; pendingTotal += v; pendingCount += 1;
-        if(v === 100) pend100 += 100;
-        if(v === 140) pend140 += 140;
+      addBtn.addEventListener("click", addParticipant);
+
+      // abrir dia (calendário)
+      calendarEl.addEventListener("click", (e) => {
+        const btn = e.target.closest('[data-action="open-day"][data-date]');
+        if(!btn) return;
+        openDay(btn.getAttribute("data-date"));
+      });
+
+      // ações dentro do painel do dia
+      dayPanel.addEventListener("click", (e) => {
+        const el = e.target.closest("[data-action]");
+        if(!el) return;
+
+        const action = el.getAttribute("data-action");
+        const id = el.getAttribute("data-id");
+        const dateStr = el.getAttribute("data-date") || selectedDateStr;
+
+        if(action === "set-status"){
+          const status = el.getAttribute("data-status");
+          if(id && dateStr && status) updateStatus(dateStr, id, status);
+        } else if(action === "remove"){
+          if(id && dateStr) removeParticipant(dateStr, id);
+        } else if(action === "promote"){
+          if(id && dateStr) promoteToConfirmed(dateStr, id);
+        } else if(action === "copy"){
+          // copia nome/contato da linha
+          const row = el.closest(".row");
+          const name = row?.querySelector(".name")?.textContent?.trim() || "";
+          const pills = Array.from(row?.querySelectorAll(".contact .pill") || []).map(x=>x.textContent.trim());
+          copyText([name, ...pills].filter(Boolean).join(" • "));
+        }
+      });
+
+      // Cadastro
+      cadSearch.addEventListener("input", renderCadastro);
+      cadNewBtn.addEventListener("click", () => openCadModal(null));
+
+      cadList.addEventListener("click", (e) => {
+        const el = e.target.closest("[data-action]");
+        if(!el) return;
+        const action = el.getAttribute("data-action");
+        const id = el.getAttribute("data-id");
+        if(!id) return;
+
+        if(action === "cad-copy"){
+          const obj = cadCache.get(id);
+          copyText(buildContactText(obj || {}));
+        } else if(action === "cad-vip"){
+          const newVip = el.getAttribute("data-vip") === "true";
+          toggleVip(id, newVip);
+        } else if(action === "cad-edit"){
+          openCadModal(id);
+        }
+      });
+
+      cadModalCloseBtn.addEventListener("click", closeCadModal);
+      cadModalCancelBtn.addEventListener("click", closeCadModal);
+      cadModalSaveBtn.addEventListener("click", saveCad);
+      cadModalDeleteBtn.addEventListener("click", deleteCad);
+      cadModal.addEventListener("click", (e) => {
+        if(e.target === cadModal) closeCadModal();
+      });
+    }
+
+    // ===== KPIs do mês (simples) =====
+    async function refreshMonthKpis(){
+      // conta em todos os dias do mês atual (pode ser pesado, mas ok pra interno)
+      const totalDays = daysInMonth(YEAR, currentMonth);
+      let paid = 0, pend = 0, espera = 0;
+
+      for(let d=1; d<=totalDays; d++){
+        const dateStr = ymd(YEAR, currentMonth+1, d);
+        const q = query(collection(db, "corujoes", dateStr, "participantes"), orderBy("createdAt","asc"));
+        const snap = await getDocs(q);
+
+        let paidDay = 0;
+        let pendDay = 0;
+        snap.forEach(docSnap => {
+          const x = docSnap.data();
+          if(x.status === "Pago") paidDay++;
+          else pendDay++;
+        });
+
+        paid += Math.min(paidDay, 10);
+        // pendente não ocupa vaga; excedente de pago vira espera automaticamente na render, então aqui estimamos espera:
+        // tudo que não entra nos 10 pagos e todo pendente contam como espera operacional.
+        const wait = Math.max(0, paidDay - 10) + pendDay;
+        espera += wait;
+        pend += pendDay;
+      }
+
+      kpiConfirmados.textContent = `Confirmados: ${paid}`;
+      kpiPendentes.textContent = `Pendentes: ${pend}`;
+      kpiEspera.textContent = `Espera: ${espera}`;
+    }
+
+    // ===== Boot =====
+    wireEvents();
+    renderNotifs();
+    renderCalendar();
+
+    prevMonthBtn.addEventListener("click", () => refreshMonthKpis());
+    nextMonthBtn.addEventListener("click", () => refreshMonthKpis());
+
+    onAuthStateChanged(auth, (user) => {
+      if(user){
+        loginScreen.style.display = "none";
+        appWrap.style.display = "block";
+        tabs.style.display = "flex";
+        actions.style.display = "flex";
+        $("userLine").textContent = `${user.email || "Usuário"} • 2026`;
+
+        showTab("reserva");
+        refreshMonthKpis();
+        pushNotif("Sessão ativa", user.email || "");
+      }else{
+        appWrap.style.display = "none";
+        tabs.style.display = "none";
+        actions.style.display = "none";
+        loginScreen.style.display = "flex";
       }
     });
 
-    paidByDay.push(paid);
-    pendingByDay.push(pend);
-  }
-
-  // Cards
-  fatReceitaPaga.textContent = formatBRL(paidTotal);
-  fatReceitaPendente.textContent = formatBRL(pendingTotal);
-  fatQtdPagos.textContent = String(paidCount);
-  fatQtdPendentes.textContent = String(pendingCount);
-
-  // Mix cards
-  fatMix100.textContent = formatBRL(total100);
-  fatMix140.textContent = formatBRL(total140);
-  fatMixPago.textContent = formatBRL(paidTotal);
-  fatMixPotencial.textContent = formatBRL(paidTotal + pendingTotal);
-
-  // Ocupação cards
-  fatConfMes.textContent = String(confirmadosMes);
-  fatEsperaMes.textContent = String(esperaMes);
-
-  // Tabela por dia (clicável)
-  fatDays.innerHTML = "";
-  for(let i=0;i<labels.length;i++){
-    const dd = labels[i];
-    const totalDia = paidByDay[i] + pendingByDay[i];
-    const badge = totalDia > 0 ? `<span class="pill">R$${totalDia.toLocaleString("pt-BR")}</span>` : `<span class="pill subtle">—</span>`;
-    fatDays.innerHTML += `
-      <button class="dayLine" type="button" onclick="openDay('${year}-${String(currentMonth+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}')">
-        <span>Dia ${dd}</span>
-        <span class="right">
-          <span class="mini ok">Pago: ${formatBRLShort(paidByDay[i])}</span>
-          <span class="mini warn">Pendente: ${formatBRLShort(pendingByDay[i])}</span>
-          ${badge}
-        </span>
-      </button>`;
-  }
-
-  // Gráfico principal (barras empilhadas por dia)
-  const ctx = document.getElementById("fatChart");
-  if(faturamentoChart) faturamentoChart.destroy();
-  faturamentoChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        { label: "Pago (R$)", data: paidByDay },
-        { label: "Pendente (R$)", data: pendingByDay }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: "top" }, tooltip: { mode: "index", intersect: false } },
-      interaction: { mode: "index", intersect: false },
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
-    }
-  });
-
-  // Gráfico Mix (100 vs 140) — receita total do mês por tipo
-  const ctxMix = document.getElementById("fatMixChart");
-  if(mixChart) mixChart.destroy();
-  mixChart = new Chart(ctxMix, {
-    type: "doughnut",
-    data: {
-      labels: ["R$100", "R$140"],
-      datasets: [{ data: [total100, total140] }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: "bottom" },
-        tooltip: {
-          callbacks: {
-            label: (item) => `${item.label}: ${formatBRL(item.raw)}`
-          }
-        }
-      }
-    }
-  });
-
-  // Gráfico Ocupação — confirmados vs espera no mês
-  const ctxOcc = document.getElementById("fatOccChart");
-  if(ocupacaoChart) ocupacaoChart.destroy();
-  ocupacaoChart = new Chart(ctxOcc, {
-    type: "doughnut",
-    data: {
-      labels: ["Confirmados", "Espera"],
-      datasets: [{ data: [confirmadosMes, esperaMes] }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: "bottom" },
-        tooltip: {
-          callbacks: {
-            label: (item) => `${item.label}: ${item.raw}`
-          }
-        }
-      }
-    }
-  });
-}
-
-function formatBRL(n){
-  return (Number(n)||0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-function formatBRLShort(n){
-  const v = Number(n)||0;
-  if(v === 0) return "R$0";
-  return "R$" + v.toLocaleString("pt-BR");
-}
-
-
-function normalizePhone(phone){
-  // Mantém apenas dígitos (ex: 11 9xxxx-xxxx -> 119xxxxxxxx)
-  return String(phone || "").replace(/\D/g, "");
-}
-function buildWhatsAppLink(d){
-  const digits = normalizePhone(d?.telefone);
-  if(!digits) return null;
-  // Se o usuário não colocar DDI, assume Brasil (55)
-  const number = digits.startsWith("55") ? digits : ("55" + digits);
-  const text = `Olá, aqui é da Santos Games Arena. Sua vaga no Corujão (${selectedDateStr || "data"}) ficou disponível. Confirma presença?`;
-  return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
-}
-function buildInstagramLink(d){
-  const raw = String(d?.instagram || "").trim();
-  if(!raw) return null;
-  const handle = raw.replace(/^@/, "").replace(/\s+/g,"");
-  if(!handle) return null;
-  return `https://instagram.com/${encodeURIComponent(handle)}`;
-}
-
-
-async function upsertCadastro({ nome, telefone, instagram }){
-  const phoneDigits = normalizePhone(telefone);
-  const instaHandle = String(instagram || "").trim().replace(/^@/,"").replace(/\s+/g,"");
-  let id = "";
-  if(phoneDigits) id = "tel_" + phoneDigits;
-  else if(instaHandle) id = "ig_" + instaHandle.toLowerCase();
-  else id = "nome_" + String(nome||"").trim().toLowerCase().replace(/\s+/g,"_").slice(0,40);
-
-  if(!id || id === "nome_") return;
-
-  await setDoc(doc(db, "cadastro", id), {
-    nome: nome || "",
-    telefone: telefone || "",
-    instagram: instagram || "",
-    updatedAt: Date.now(),
-    lastDate: selectedDateStr || ""
-  }, { merge: true });
-}
-
-function buildContactText(d){
-  const parts = [];
-  if(d?.nome) parts.push(d.nome);
-  if(d?.telefone) parts.push("Telefone: " + d.telefone);
-  if(d?.instagram) parts.push("Instagram: " + d.instagram);
-  return parts.join(" • ");
-}
-
-function escapeHtml(str){
-  return String(str).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;").replaceAll("'","&#039;");
-}
-
-// ===== Wiring de UI (sem onclick) =====
-function wireStaticUI(){
-  const loginBtn = document.getElementById("loginBtn");
-  if(loginBtn) loginBtn.addEventListener("click", () => window.doLogin());
-
-  const logoutBtn = document.getElementById("logoutBtn");
-  if(logoutBtn) logoutBtn.addEventListener("click", () => window.logout());
-
-  const tabReservaBtn = document.getElementById("tabReserva");
-  const tabFatBtn = document.getElementById("tabFaturamento");
-  const tabCadBtn = document.getElementById("tabCadastro");
-  if(tabReservaBtn) tabReservaBtn.addEventListener("click", () => window.showTab("reserva"));
-  if(tabFatBtn) tabFatBtn.addEventListener("click", () => window.showTab("faturamento"));
-  if(tabCadBtn) tabCadBtn.addEventListener("click", () => window.showTab("cadastro"));
-
-  document.querySelectorAll('button.navBtn[data-nav="prev"]').forEach(b => b.addEventListener("click", () => window.prevMonth()));
-  document.querySelectorAll('button.navBtn[data-nav="next"]').forEach(b => b.addEventListener("click", () => window.nextMonth()));
-
-  const closeDayBtn = document.getElementById("closeDayBtn");
-  if(closeDayBtn) closeDayBtn.addEventListener("click", () => window.closeDayPanel());
-
-  const addBtn = document.getElementById("addParticipantBtn");
-  if(addBtn) addBtn.addEventListener("click", () => window.addParticipant());
-
-  const notifBtn = document.getElementById("notifBtn");
-  if(notifBtn) notifBtn.addEventListener("click", () => window.toggleNotifs());
-
-  const clearBtn = document.getElementById("clearNotifsBtn");
-  if(clearBtn) clearBtn.addEventListener("click", () => window.clearNotifs());
-}
-if(document.readyState === "loading"){
-  document.addEventListener("DOMContentLoaded", wireStaticUI);
-} else {
-  wireStaticUI();
-}
-
-</script>
-
-<style>
-:root{
-  --bg: #0b0b0f;
-  --border: rgba(255,255,255,.10);
-  --text: rgba(255,255,255,.92);
-  --muted: rgba(255,255,255,.70);
-  --muted2: rgba(255,255,255,.52);
-  --brand: #e10600;
-  --brand2: #b00500;
-  --shadow: 0 20px 60px rgba(0,0,0,.45);
-  --radius: 16px;
-}
-*{ box-sizing:border-box; }
-html, body{ height:100%; }
-body{
-  margin:0;
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  background: radial-gradient(1200px 600px at 20% 10%, rgba(225,6,0,.18), transparent 55%),
-              radial-gradient(900px 500px at 80% 30%, rgba(255,255,255,.06), transparent 60%),
-              var(--bg);
-  color: var(--text);
-}
-.topbar{
-  position: sticky; top: 0; z-index: 10;
-  background: rgba(11,11,15,.65);
-  backdrop-filter: blur(14px);
-  border-bottom: 1px solid var(--border);
-}
-.topbarInner{
-  max-width: 1100px; margin: 0 auto; padding: 14px 16px;
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
-}
-.brand{ display:flex; flex-direction:column; line-height:1.1; }
-.brand b{ font-size: 14px; letter-spacing:.12em; text-transform: uppercase; }
-.brand span{ font-size: 12px; color: var(--muted2); }
-.actions{ display:flex; align-items:center; gap:10px; }
-.btn{
-  appearance:none; border:none; cursor:pointer;
-  border-radius: 12px; padding: 10px 12px; font-weight: 600;
-  color: white; background: var(--brand);
-  transition: transform .06s ease, background .15s ease;
-}
-.btn:hover{ background: var(--brand2); }
-.btn:active{ transform: translateY(1px); }
-.btn.ghost{
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-.btn.ghost:hover{ background: rgba(255,255,255,.10); }
-.btn.danger{
-  background: rgba(244,63,94,.16);
-  border: 1px solid rgba(244,63,94,.35);
-  color: #ffd0d6;
-}
-.btn.danger:hover{ background: rgba(244,63,94,.24); }
-.wrap{ max-width: 1100px; margin: 0 auto; padding: 18px 16px 32px; }
-.tabs{
-  display:flex; gap:8px; padding: 6px;
-  background: rgba(255,255,255,.05);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-}
-.tab{
-  border:none; cursor:pointer; padding: 10px 14px; border-radius: 12px;
-  background: transparent; color: var(--muted); font-weight: 600;
-}
-.tab.active{ background: rgba(225,6,0,.18); color: white; }
-
-.grid{ display:grid; grid-template-columns: 1.1fr .9fr; gap: 14px; margin-top: 14px; }
-@media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
-
-.card{
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-}
-.cardHeader{
-  padding: 14px 14px 10px;
-  display:flex; align-items:center; justify-content:space-between; gap:10px;
-}
-.cardHeader h2{
-  margin:0; font-size: 14px; letter-spacing:.06em; text-transform: uppercase; color: var(--muted);
-}
-.monthNav{ display:flex; align-items:center; gap: 8px; }
-.monthTitle{ font-size: 18px; font-weight: 700; }
-.navBtn{
-  border:none; cursor:pointer; width: 38px; height: 38px; border-radius: 12px;
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-.navBtn:hover{ background: rgba(255,255,255,.10); }
-
-.calendarWrap{ padding: 0 14px 14px; }
-.calendarGrid{ display:grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
-.dow{ text-align:center; font-weight: 700; font-size: 12px; color: var(--muted2); padding: 6px 0; }
-.empty{ min-height: 56px; }
-.day{
-  position:relative; text-align:left; min-height: 58px;
-  padding: 10px 10px 8px; border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.04);
-  color: var(--text);
-}
-.day:hover{ background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.14); }
-.dayNum{ font-weight: 700; font-size: 14px; }
-.badge{
-  position:absolute; right: 8px; bottom: 8px;
-  padding: 3px 8px; border-radius: 999px; font-size: 11px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.06);
-  color: var(--muted);
-  opacity: 0; transform: translateY(3px);
-  transition: opacity .15s ease, transform .15s ease;
-}
-.badge.has{ opacity: 1; transform: translateY(0); }
-.badge.full{ background: rgba(225,6,0,.22); border-color: rgba(225,6,0,.38); color: #ffd0d0; }
-
-.side{ overflow:hidden; }
-.sideInner{ padding: 14px; }
-.sideTitle{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
-.sideTitle h3{ margin:0; font-size: 16px; }
-.sideTitle p{ margin: 3px 0 0; color: var(--muted2); font-size: 12px; }
-
-.formRow{ display:grid; grid-template-columns: 1fr; gap: 10px; margin-top: 10px; }
-.input{
-  width: 100%; padding: 11px 12px; border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(0,0,0,.25);
-  color: var(--text); outline: none;
-}
-.input:focus{ border-color: rgba(225,6,0,.50); box-shadow: 0 0 0 4px rgba(225,6,0,.12); }
-
-.choices{ display:flex; flex-wrap:wrap; gap: 8px; margin-top: 2px; }
-.choice{
-  display:flex; align-items:center; gap: 8px; padding: 8px 10px;
-  border-radius: 999px; border: 1px solid var(--border);
-  background: rgba(255,255,255,.04); color: var(--muted); font-size: 12px;
-}
-.choice input{ accent-color: var(--brand); }
-
-.sectionLabel{
-  margin-top: 12px; font-size: 12px; color: var(--muted2);
-  text-transform: uppercase; letter-spacing: .08em;
-}
-.list{
-  margin-top: 10px; display:flex; flex-direction:column; gap: 10px;
-  max-height: 520px; overflow:auto; padding-right: 4px;
-}
-.row{
-  display:flex; gap: 10px; justify-content:space-between; align-items:flex-start;
-  padding: 12px; border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04);
-}
-.row.confirmado{ border-left: 4px solid rgba(34,197,94,.85); }
-.row.espera{ border-left: 4px solid rgba(225,6,0,.85); }
-.rowLeft{ min-width: 0; }
-.name{ font-weight: 700; font-size: 14px; margin-bottom: 6px; }
-.meta{ display:flex; gap: 6px; flex-wrap:wrap; }
-
-.pill{
-  padding: 4px 8px; border-radius: 999px; font-size: 12px;
-  border: 1px solid rgba(255,255,255,.10);
-  color: var(--muted); background: rgba(255,255,255,.04);
-}
-.pill.ok{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.25); color:#caffdd; }
-.pill.warn{ background: rgba(244,63,94,.12); border-color: rgba(244,63,94,.25); color:#ffd0d6; }
-.pill.subtle{ opacity:.75; }
-.tag{ padding: 4px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; }
-.tag.ok{ background: rgba(34,197,94,.16); color:#caffdd; }
-.tag.warn{ background: rgba(225,6,0,.16); color:#ffd0d0; }
-.rowActions{ display:flex; gap: 8px; flex-wrap:wrap; justify-content:flex-end; }
-.rowActions .btn{ padding: 8px 10px; }
-a.linkbtn{ text-decoration:none; display:inline-flex; align-items:center; }
-
-@media (max-width: 980px){
-  .side{ position: fixed; inset: 0; display:none; z-index: 20; background: rgba(0,0,0,.55); }
-  .side.open{ display:block; }
-  .sideInner{
-    position:absolute; left:0; right:0; bottom:0;
-    max-height: 85vh;
-    border-radius: 20px 20px 0 0;
-    background: rgba(15,15,20,.98);
-    border-top: 1px solid var(--border);
-    box-shadow: var(--shadow);
-    overflow:auto;
-  }
-}
-
-.loginWrap{ min-height: 100%; display:flex; align-items:center; justify-content:center; padding: 20px; }
-.loginCard{
-  width: min(420px, 100%);
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  padding: 18px;
-}
-.loginCard h1{ margin:0; font-size: 18px; }
-.loginCard p{ margin:6px 0 14px; color: var(--muted2); font-size: 13px; }
-.loginCard .btn{ width: 100%; margin-top: 8px; }
-
-.toast{
-  position: fixed; left: 50%; bottom: 18px;
-  transform: translateX(-50%) translateY(12px);
-  opacity: 0; pointer-events: none;
-  background: rgba(10,10,14,.92);
-  border: 1px solid rgba(255,255,255,.14);
-  color: var(--text);
-  padding: 10px 12px;
-  border-radius: 999px;
-  box-shadow: var(--shadow);
-  transition: opacity .2s ease, transform .2s ease;
-  font-size: 13px;
-}
-.toast.show{ opacity: 1; transform: translateX(-50%) translateY(0); }
-
-.stats{
-  display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-}
-@media (max-width: 980px){ .stats{ grid-template-columns: repeat(2, 1fr); } }
-
-.stat{
-  padding: 12px; border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.04);
-}
-.stat .k{ font-size: 12px; color: var(--muted2); text-transform: uppercase; letter-spacing:.08em; }
-.stat .v{ margin-top: 6px; font-weight: 800; font-size: 16px; }
-
-.chartBox{ height: 320px; padding: 12px; }
-
-.twoCharts{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-@media (max-width: 980px){
-  .twoCharts{ grid-template-columns: 1fr; }
-}
-.chartMini{ height: 260px; padding: 12px; }
-
-.dayLines{
-  display:flex; flex-direction:column; gap: 8px;
-  max-height: 340px; overflow:auto; padding-right: 4px;
-}
-.dayLine{
-  display:flex; align-items:center; justify-content:space-between; gap: 10px;
-  padding: 10px 12px; border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.04);
-  color: var(--text); cursor:pointer;
-}
-.dayLine:hover{ background: rgba(255,255,255,.07); }
-.dayLine .right{ display:flex; gap: 10px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
-.mini{ font-size: 12px; color: var(--muted); }
-.mini.ok{ color: #caffdd; }
-.mini.warn{ color: #ffd0d6; }
-
-.stack{ margin-top: 10px; display:grid; gap:10px; }
-.stackHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.stackHeader h4{ margin:0; font-size: 12px; letter-spacing:.08em; text-transform: uppercase; color: var(--muted); }
-.stackHeader .count{ padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04); color: var(--muted); font-size: 12px; }
-.emptyState{ padding: 10px 12px; border-radius: 14px; border: 1px dashed rgba(255,255,255,.14); color: var(--muted2); background: rgba(255,255,255,.03); font-size: 13px; }
-
-
-.twoInputs{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-@media (max-width: 520px){ .twoInputs{ grid-template-columns: 1fr; } }
-.contact{ display:flex; gap: 6px; flex-wrap:wrap; margin: 2px 0 6px; }
-
-
-.iconBtn{
-  position: relative;
-  border:none; cursor:pointer;
-  width: 40px; height: 40px;
-  border-radius: 12px;
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-.iconBtn:hover{ background: rgba(255,255,255,.10); }
-.notifBadge{
-  position:absolute;
-  top: -6px; right: -6px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: rgba(225,6,0,.92);
-  color: white;
-  font-size: 11px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-.notifPanel{
-  position: absolute;
-  right: 16px;
-  top: 64px;
-  width: min(420px, calc(100vw - 24px));
-  max-height: 70vh;
-  overflow:auto;
-  background: rgba(15,15,20,.98);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  display:none;
-  padding: 12px;
-}
-.notifPanel.open{ display:block; }
-.notifHeader{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.notifH{ font-weight: 800; }
-.notifS{ font-size: 12px; color: var(--muted2); margin-top: 2px; }
-.notifList{ display:flex; flex-direction:column; gap: 10px; }
-.notifItem{
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.04);
-}
-.notifTop{ display:flex; justify-content:space-between; gap: 10px; }
-.notifTitle{ font-weight: 700; }
-.notifTime{ font-size: 12px; color: var(--muted2); white-space: nowrap; }
-.notifDetail{ margin-top: 6px; font-size: 13px; color: var(--muted); }
-
-.cadList{ display:flex; flex-direction:column; gap: 10px; }
-.cadRow{
-  display:flex; align-items:flex-start; justify-content:space-between; gap: 10px;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.04);
-}
-.cadLeft{ min-width: 0; }
-.cadName{ font-weight: 800; }
-.cadMeta{ display:flex; gap: 6px; flex-wrap:wrap; margin-top: 6px; }
-.cadActions{ display:flex; gap: 8px; flex-wrap:wrap; justify-content:flex-end; }
-
-
-.modalOverlay{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.6);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding: 16px;
-  z-index: 50;
-}
-.modalCard{
-  width: min(560px, 100%);
-  background: rgba(15,15,20,.98);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-}
-.modalHeader{
-  padding: 14px;
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap: 10px;
-  border-bottom: 1px solid rgba(255,255,255,.08);
-}
-.modalTitle{ font-weight: 900; font-size: 16px; }
-.modalSub{ font-size: 12px; color: var(--muted2); margin-top: 4px; }
-.modalBody{ padding: 14px; }
-.modalActions{
-  margin-top: 14px;
-  display:flex;
-  gap: 10px;
-  align-items:center;
-}
-.vipBadge{
-  display:inline-flex;
-  align-items:center;
-  padding: 3px 8px;
-  border-radius: 999px;
-  margin-left: 8px;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .06em;
-  background: rgba(225,6,0,.20);
-  border: 1px solid rgba(225,6,0,.35);
-  color: #ffd0d0;
-}
-
-</style>
-</head>
-
-<body>
-<div id="loginScreen" class="loginWrap">
-  <div class="loginCard">
-    <h1>Santos Games</h1>
-    <p>DashBoard Corujões • 2026</p>
-    <input id="email" class="input" placeholder="Email" />
-    <div style="height:10px"></div>
-    <input id="senha" class="input" type="password" placeholder="Senha" />
-    <button class="btn" id="loginBtn" type="button">Entrar</button>
-  </div>
-</div>
-
-<div id="app" style="display:none;">
-  <div class="topbar">
-    <div class="topbarInner">
-      <div class="brand">
-        <b>Santos Games</b>
-        <span>DashBoard Corujões • 2026</span>
-      </div>
-      <div class="actions">
-        <div class="tabs">
-          <button id="tabReserva" class="tab active" type="button">Reserva</button>
-          <button id="tabFaturamento" class="tab" type="button">Faturamento</button>
-          <button id="tabCadastro" class="tab" type="button">Cadastro</button>
-        </div>
-        <button class="btn ghost" id="logoutBtn" type="button">Sair</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="wrap">
-    <div id="reserva">
-      <div class="grid">
-        <div class="card">
-          <div class="cardHeader">
-            <h2>Calendário</h2>
-            <div class="monthNav">
-              <button class="navBtn" data-nav="prev" type="button" title="Mês anterior">◀</button>
-              <div class="monthTitle" id="monthLabel">Janeiro 2026</div>
-              <button class="navBtn" data-nav="next" type="button" title="Próximo mês">▶</button>
-            </div>
-          </div>
-          <div class="calendarWrap">
-            <div id="diasSemana" class="calendarGrid"></div>
-            <div id="calendar" class="calendarGrid"></div>
-          </div>
-        </div>
-
-        <div id="dayPanel" class="card side">
-          <div class="sideInner">
-            <div class="sideTitle">
-              <div>
-                <h3>Reserva do dia</h3>
-                <p>Data: <b id="selectedDate">—</b> • <span id="dayStats">Selecione um dia.</span></p>
-              </div>
-              <button class="btn ghost" id="closeDayBtn" type="button">Fechar</button>
-            </div>
-
-            <div class="sectionLabel">Adicionar</div>
-            <div class="formRow">
-              <input id="newName" class="input" placeholder="Nome do participante" />
-              <div class="twoInputs">
-                <input id="newPhone" class="input" inputmode="tel" placeholder="Telefone (opcional)" />
-                <input id="newInsta" class="input" placeholder="Instagram (opcional)" />
-              </div>
-
-              <div>
-                <div class="sectionLabel" style="margin-top:0;">Valor</div>
-                <div class="choices">
-                  <label class="choice"><input type="radio" name="valor" value="100" checked />R$100</label>
-                  <label class="choice"><input type="radio" name="valor" value="140" />R$140</label>
-                </div>
-              </div>
-
-              <div>
-                <div class="sectionLabel" style="margin-top:0;">Status</div>
-                <div class="choices">
-                  <label class="choice"><input type="radio" name="status" value="Pago" />Pago</label>
-                  <label class="choice"><input type="radio" name="status" value="Pendente" checked />Pendente</label>
-                </div>
-              </div>
-
-              <button class="btn" id="addParticipantBtn" type="button">Adicionar</button>
-            </div>
-
-            <div class="stack">
-              <div class="stackHeader">
-                <h4>Confirmados</h4>
-                <span class="count" id="confCount">0/10</span>
-              </div>
-              <div id="confList" class="list"></div>
-
-              <div class="stackHeader" style="margin-top:6px;">
-                <h4>Lista de espera</h4>
-                <span class="count" id="esperaCount">0</span>
-              </div>
-              <div id="esperaList" class="list"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="faturamento" style="display:none;">
-      <div class="card">
-        <div class="cardHeader">
-          <h2>Faturamento Mensal</h2>
-          <div class="monthNav">
-            <button class="navBtn" data-nav="prev" type="button" title="Mês anterior">◀</button>
-            <div class="monthTitle" id="fatMonthLabel">Janeiro 2026</div>
-            <button class="navBtn" data-nav="next" type="button" title="Próximo mês">▶</button>
-          </div>
-        </div>
-
-        <div class="sideInner">
-          <div class="stats">
-            <div class="stat"><div class="k">Receita Paga</div><div class="v" id="fatReceitaPaga">R$0</div></div>
-            <div class="stat"><div class="k">Receita Pendente</div><div class="v" id="fatReceitaPendente">R$0</div></div>
-            <div class="stat"><div class="k">Qtd Pagos</div><div class="v" id="fatQtdPagos">0</div></div>
-            <div class="stat"><div class="k">Qtd Pendentes</div><div class="v" id="fatQtdPendentes">0</div></div>
-          </div>
-
-          <div style="height:12px"></div>
-
-          <div class="twoCharts">
-            <div class="card chartMini">
-              <div class="sectionLabel" style="margin-top:0;">Mix R$100 vs R$140</div>
-              <canvas id="fatMixChart"></canvas>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-                <span class="pill">100: <b id="fatMix100">R$0</b></span>
-                <span class="pill">140: <b id="fatMix140">R$0</b></span>
-              </div>
-            </div>
-            <div class="card chartMini">
-              <div class="sectionLabel" style="margin-top:0;">Ocupação do mês</div>
-              <canvas id="fatOccChart"></canvas>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-                <span class="pill ok">Confirmados: <b id="fatConfMes">0</b></span>
-                <span class="pill warn">Espera: <b id="fatEsperaMes">0</b></span>
-              </div>
-            </div>
-          </div>
-
-          <div style="height:12px"></div>
-
-          <div class="card chartBox">
-            <div class="sectionLabel" style="margin:0 0 10px 0;">Pago x Pendente por dia</div>
-            <canvas id="fatChart"></canvas>
-          </div>
-
-          <div style="height:12px"></div>
-
-          <div class="sectionLabel" style="margin-top:2px;">Detalhe por dia (toque para abrir a reserva)</div>
-          <div id="fatDays" class="dayLines"></div>
-        </div>
-      </div>
-    </div>
-
-    <div id="cadastro" style="display:none;">
-      <div class="card">
-        <div class="cardHeader">
-          <h2>Cadastro (Base de contatos)</h2>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <input id="cadSearch" class="input" placeholder="Buscar por nome, telefone ou instagram" style="width:320px; max-width: 55vw;" />
-          </div>
-        </div>
-        <div class="sideInner">
-          <div class="sectionLabel" style="margin-top:0;">Pessoas adicionadas</div>
-          <div id="cadList" class="cadList"></div>
-        </div>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-
-<!-- Cadastro Modal -->
-<div id="cadModal" class="modalOverlay" style="display:none;">
-  <div class="modalCard">
-    <div class="modalHeader">
-      <div>
-        <div class="modalTitle">Editar cadastro</div>
-        <div class="modalSub" id="cadModalSub">Atualize os dados do contato</div>
-      </div>
-      <button class="btn ghost" onclick="closeCadModal()">Fechar</button>
-    </div>
-
-    <div class="modalBody">
-      <div class="twoInputs">
-        <input id="cadEditNome" class="input" placeholder="Nome" />
-        <input id="cadEditTelefone" class="input" inputmode="tel" placeholder="Telefone" />
-      </div>
-      <div style="height:10px"></div>
-      <input id="cadEditInstagram" class="input" placeholder="Instagram" />
-      <div style="height:10px"></div>
-
-      <label class="choice" style="width:fit-content;">
-        <input id="cadEditVip" type="checkbox" /> VIP / Cliente frequente
-      </label>
-
-      <div class="modalActions">
-        <button class="btn danger" onclick="deleteCad()">Excluir</button>
-        <div style="flex:1"></div>
-        <button class="btn ghost" onclick="closeCadModal()">Cancelar</button>
-        <button class="btn" onclick="saveCad()">Salvar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div id="toast" class="toast"></div>
+  </script>
 </body>
 </html>
