@@ -18,12 +18,9 @@ import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc
 
 // 🔴 COLE AQUI SUA CONFIG DO FIREBASE
 const firebaseConfig = {
-  apiKey: "AIzaSyA_wOciiIQdOvMlYDgJLqLBwghDmFABQHM",
-  authDomain: "dashboard-santos-games.firebaseapp.com",
-  projectId: "dashboard-santos-games",
-  storageBucket: "dashboard-santos-games.firebasestorage.app",
-  messagingSenderId: "638652431482",
-  appId: "1:638652431482:web:d1abc192de6ccdc684cfc3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -401,6 +398,12 @@ window.showTab = (tab) => {
 
   document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
   const map = { reserva: "tabReserva", faturamento: "tabFaturamento", cadastro: "tabCadastro" };
+  document.getElementById(map[tab]).classList.add("active");
+
+  if(tab === "faturamento") refreshFaturamento();
+  if(tab === "cadastro") wireCadastro();
+};
+
   document.getElementById(map[tab]).classList.add("active");
 
   if(tab === "faturamento") refreshFaturamento();
